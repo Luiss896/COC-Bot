@@ -26,7 +26,7 @@ from cocbot.capture.window import GameWindow, find_game_window
 from cocbot.config.models import Config
 from cocbot.core.types import Frame
 from cocbot.safety.humanize import AntiBanMonitor, Humanizer
-from cocbot.vision.safe_tap import find_safe_tap_point, looks_like_home
+from cocbot.vision.safe_tap import find_safe_tap_point, looks_like_home, panel_likely_open
 
 
 class BotState(StrEnum):
@@ -200,16 +200,23 @@ class BotController:
                     continue
                 health = source.health()
                 home = looks_like_home(frame.image)
+                panel_open = panel_likely_open(frame.image)
+                if panel_open:
+                    message = "pannello aperto: tap a vuoto sospesi"
+                elif home:
+                    message = "in esecuzione (home)"
+                else:
+                    message = "in esecuzione (stato non riconosciuto: solo monitor)"
                 self._update(
                     BotState.RUNNING,
-                    "in esecuzione (home)" if home else "in esecuzione (stato non riconosciuto: solo monitor)",
+                    message,
                     fps=health.fps,
                     frames=health.frames,
                     home_detected=home,
                 )
                 if self._apply_breaks():
                     continue
-                if home and self.humanizer.maybe_idle_tap():
+                if home and not panel_open and self.humanizer.maybe_idle_tap():
                     self._idle_tap(sink, frame)
                 self._wait(self.poll_s)
         finally:

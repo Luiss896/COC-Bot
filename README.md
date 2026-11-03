@@ -19,7 +19,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Avvio del gioco** | **Manuale** dell'utente: il bot rileva la finestra di gioco già aperta e si aggancia; **non avvia** GPGPC né il gioco. |
 | **Avvio/stop del bot** | **Manuale**, da GUI con hotkey globale configurabile: default `Ctrl+Alt+L` (config `gui.hotkey_start_stop`). |
 | **Zero interferenza** | **Validato**: WGC cattura anche coperta (47,4 FPS, 0 neri) e i click via messaggi aprono/chiudono pannelli **senza cambiare foreground né cursore**. |
-| **Vincolo finestra** | Il gioco **non deve essere minimizzato** (WGC non cattura finestre minimizzate): il bot va in pausa. Coperta sì; fullscreen borderless da testare. |
+| **Vincolo finestra** | Il gioco **non deve essere minimizzato** (WGC non cattura finestre minimizzate): il bot va in pausa. Coperta sì; **fullscreen verificato** (client 2452×1379, offset frame (0,29), mappatura tap corretta) ma occupa tutto lo schermo → per girare mentre lavori meglio la finestra. |
 | **Anti-ban/humanization** | Ritmi variabili, pause random, tap a vuoto **solo su erba vuota** (mai gemme/shop), rate limit, avvisi anti-ban in GUI; **non garantisce** l'immunità dal ban. Vedi [ADR-003](docs/ADR-003-humanization-antiban.md). |
 | **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
 | **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
@@ -37,8 +37,10 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **GUI minimale** (tkinter): Start/Stop, hotkey `Ctrl+Alt+L` / kill switch `Ctrl+Alt+K`, stato e avvisi anti-ban
 - [x] **Humanization/anti-ban**: ritmi variabili, pause random, tap a vuoto solo su erba vuota, rate limit, avvisi
 - [x] **Impatto misurato** (`bench`): **6,6% di un core**, ~74 MB RAM, cattura 5 FPS → non interferisce
-- [ ] Test del passaggio a fullscreen (requisito utente: non deve rompersi)
+- [x] **Fullscreen verificato**: client 2452×1379, frame WGC 2452×1408, crop (0,29), mappatura tap corretta (match 0,967)
+- [x] **Gate pannello**: niente tap a vuoto se nella zona basso-centro è aperto un pannello info
 - [ ] Dataset schermate (EN) + classifier stati
+- [ ] Auto-riconoscimento livelli (TH, eroi via Hero Hall, mura, esercito) tramite visione/OCR
 - [ ] Loop attacco (skip + dragon spam)
 - [ ] Upgrade + wall check + GemGuard
 - [ ] GUI PySide6 completa

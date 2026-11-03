@@ -47,9 +47,14 @@ Misure reali sul PC, gioco aperto in home village, finestra del gioco **non** in
 2. **Sandbox/integrità:** un processo a **bassa integrità** (es. sandbox DSH) riceve
    `Failed to convert item to GraphicsCaptureItem` e non può usare WGC; il bot va lanciato
    normalmente dall'utente (integrità media). I POC di sviluppo vanno eseguiti fuori dal sandbox.
-3. **Fullscreen**: il caso "borderless fullscreen" è supportato per costruzione (frame e client
-   coincidono → crop (0,0,2560,1440)); **da verificare a runtime** quando l'utente passa a fullscreen
-   (in particolare: se GPGPC usa true fullscreen esclusivo, WGC può non funzionare → rilevare e avvisare).
+3. **Fullscreen (verificato a runtime il 3 nov 2026 ~13:57)**: con il gioco in fullscreen il client è
+   **2452×1379** (finestra 2470×1426, origine screen (99,45)), il frame WGC nativo è **2452×1408** e il
+   contenuto client parte a **offset (0, 29)**. L'offset è stato verificato sperimentalmente confrontando
+   la cattura WGC con una cattura `mss` dell'area client (template match, score **0,967**): la mappatura
+   tap canoniche→client resta corretta anche in fullscreen. WGC in fullscreen: 9 frame in 2 s (5 FPS
+   richiesti), 0 neri/stale; bench 10 s: **CPU 13,7% di un core** (frame più grande), RAM ~89 MB.
+   Nota: in fullscreen il gioco occupa tutto lo schermo → per "girare mentre l'utente usa il PC" resta
+   consigliata la modalità **finestra** (anche coperta); il fullscreen è supportato per sessioni dedicate.
 4. **Tasti:** `key()` via messaggi è best-effort (il gioco può ignorare i tasti sintetici); il back/ESC
    va verificato; per ora i flussi si basano solo su tap.
 5. **Fragilità:** il gioco accetta i messaggi sintetici per questa versione; va ri-verificato a ogni
