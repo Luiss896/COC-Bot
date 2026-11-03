@@ -116,6 +116,7 @@ class ScreenState(StrEnum):
     BUILD_MENU = "build_menu"
     UPGRADE_CONFIRM = "upgrade_confirm"
     WALL_UPGRADER = "wall_upgrader"
+    PLACEMENT = "placement"  # piazzamento nuovo edificio (flusso "New building")
     SHOP = "shop"  # da evitare: GemGuard
     NETWORK_ERROR = "network_error"
     MAINTENANCE = "maintenance"

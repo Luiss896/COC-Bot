@@ -153,14 +153,23 @@ class UpgradeConfig(BaseModel):
     enabled: bool = True
     preset: str = "balanced_th18"
     queue: list[dict[str, Any]] = Field(default_factory=list)
+    # ordine di priorita' delle categorie per il planner (prima = piu' importante)
+    priority: list[str] = Field(
+        default_factory=lambda: ["heroes", "army", "defense", "resources", "walls", "other"]
+    )
     reserves: dict[str, int] = Field(
         default_factory=lambda: {"gold": 200_000, "elixir": 200_000, "dark": 3_000}
     )
     max_upgrades_per_cycle: int = Field(default=3, ge=1, le=10)
     use_lab: bool = True
     use_heroes: bool = True
+    # le mura restano escluse dalla v1 dell'engine (flusso wall upgrader non ancora validato)
+    include_walls: bool = False
+    # dry-run: il planner legge la lista e stampa il piano, l'executor non preme CONFIRM
+    dry_run: bool = True
     ignore_categories: list[str] = Field(default_factory=list)
     verify_after_upgrade: bool = True
+    max_scan_scrolls: int = Field(default=45, ge=5, le=80)
 
 
 class WallsConfig(BaseModel):

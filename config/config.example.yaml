@@ -100,12 +100,20 @@ upgrade:
   enabled: true
   preset: "balanced_th18"
   queue: []
+  # ordine di priorita' delle categorie per il planner (prime = piu' importanti)
+  priority: ["heroes", "army", "defense", "resources", "walls", "other"]
   reserves: { gold: 200000, elixir: 200000, dark: 3000 }
   max_upgrades_per_cycle: 3
   use_lab: true
   use_heroes: true
+  # mura: escluse dalla v1 dell'engine (flusso wall upgrader non ancora validato; vedi walls.*)
+  include_walls: false
+  # dry_run: legge la lista ed emette il piano, non preme mai CONFIRM. Mettere false solo
+  # dopo aver verificato il piano con `python -m cocbot upgrade-scan`.
+  dry_run: true
   ignore_categories: []
   verify_after_upgrade: true
+  max_scan_scrolls: 45
 
 walls:
   mode: "check_only"                     # off | check_only | walls_first_excess | gate_before_th | strict_walls

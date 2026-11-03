@@ -276,6 +276,11 @@ def cmd_config_check(args: argparse.Namespace) -> int:
     )
     print(f"  attack: strategy={config.attack.strategy}  preset={config.upgrade.preset}")
     print(
+        f"  upgrade: enabled={config.upgrade.enabled}  dry_run={config.upgrade.dry_run}  "
+        f"priority={config.upgrade.priority}  max/cycle={config.upgrade.max_upgrades_per_cycle}  "
+        f"include_walls={config.upgrade.include_walls}"
+    )
+    print(
         f"  humanize: enabled={config.humanize.enabled}  delay_ms={config.humanize.action_delay_ms}  "
         f"idle_tap_prob={config.humanize.idle_tap_probability}  "
         f"max_actions/min={config.humanize.max_actions_per_minute}"
@@ -308,6 +313,135 @@ def cmd_adb_check(args: argparse.Namespace) -> int:
         print(f"ERRORE ADB: {exc}")
         return 1
     return 0
+
+
+def _load_upgrade_engine(config_path: str):
+    """Crea un ``UpgradeEngine`` sul gioco aperto (errore chiaro se manca/minimizzato)."""
+    from cocbot.app.upgrade_engine import UpgradeEngine
+    from cocbot.capture import win32, window
+    from cocbot.config import load_config
+
+    win32.set_dpi_awareness()
+    config = load_config(Path(config_path))
+    info = window.find_game_window()
+    if info is None:
+        raise SystemExit("ERRORE: gioco non in esecuzione. Avvialo manualmente da GPGPC.")
+    if win32.is_minimized(info.hwnd):
+        raise SystemExit("ERRORE: finestra del gioco minimizzata (WGC non cattura finestre minimizzate).")
+    game_window = window.GameWindow(info)
+    print(f"finestra: {game_window}")
+    return config, UpgradeEngine(game_window, config, log=print)
+
+
+def _upgrade_report_path(out_arg: str | None, prefix: str) -> Path:
+    if out_arg:
+        return Path(out_arg)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return Path("out") / "upgrade" / f"{prefix}-{stamp}.json"
+
+
+def _print_scan_summary(report, plan) -> None:
+    from cocbot.app.upgrade_engine import categorize
+
+    print(f"\n== HUD (letto in home) ==\n  {report.hud}")
+    for note in report.notes:
+        print(f"  nota: {note}")
+    print(f"\n== CATALOGO (righe lette: {len(report.rows)}) ==")
+    for row in report.rows:
+        category = categorize(row.name) or "?"
+        new_txt = " [NEW]" if row.is_new else ""
+        print(f"  [{category:9s}] {row}{new_txt}")
+    print(f"\n== PIANO (candidati: {len(plan.candidates)}, scelti: {len(plan.chosen)}) ==")
+    for note in plan.notes:
+        print(f"  nota: {note}")
+    for item in plan.chosen:
+        print(f"  -> [{item.category}] {item.row}")
+    if not plan.chosen:
+        print("  (nessun upgrade pianificato)")
+    if plan.skipped:
+        print(f"\n  scartati: {len(plan.skipped)}")
+        for skipped in plan.skipped[:12]:
+            print(f"    - {skipped.row} · {skipped.reason}")
+        if len(plan.skipped) > 12:
+            print(f"    ... e altri {len(plan.skipped) - 12}")
+
+
+def cmd_upgrade_scan(args: argparse.Namespace) -> int:
+    """Legge il catalogo del menu Build e stampa il piano. NON invia input di upgrade."""
+    from cocbot.app.upgrade_engine import UpgradeEngineError, save_json
+    from cocbot.vision.ocr import OcrUnavailable
+
+    config, engine = _load_upgrade_engine(args.config)
+    try:
+        report = engine.scan(max_scrolls=args.max_scrolls)
+        plan = engine.plan(report)
+        _print_scan_summary(report, plan)
+        path = save_json(
+            _upgrade_report_path(args.out, "scan"),
+            {
+                "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "config": args.config,
+                "dry_run": True,
+                "scan": report.to_dict(),
+                "plan": plan.to_dict(),
+            },
+        )
+        print(f"\nreport salvato: {path}")
+        print("Nessuna spesa: scansione di sola lettura (il menu viene aperto e chiuso).")
+        return 0
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
+        return 1
+    except UpgradeEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
+
+
+def cmd_upgrade_run(args: argparse.Namespace) -> int:
+    """Pianifica ed esegue gli upgrade. Senza ``--execute`` e' un dry-run."""
+    from cocbot.app.upgrade_engine import UpgradeEngineError, save_json
+    from cocbot.vision.ocr import OcrUnavailable
+
+    config, engine = _load_upgrade_engine(args.config)
+    dry_run = not getattr(args, "execute", False)
+    try:
+        report = engine.scan(max_scrolls=args.max_scrolls)
+        plan = engine.plan(report)
+        _print_scan_summary(report, plan)
+        results = engine.execute(plan, dry_run=dry_run)
+        print(f"\n== ESECUZIONE ({'dry-run' if dry_run else 'REALE'}) ==")
+        for result in results:
+            status = "OK" if result.ok else "FALLITO"
+            print(f"  [{status}] {result.row} · {result.reason}")
+        if not dry_run and results:
+            print("ATTENZIONE: esecuzione reale richiesta. Verifica HUD/builder nel report.")
+        path = save_json(
+            _upgrade_report_path(args.out, "run"),
+            {
+                "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "config": args.config,
+                "dry_run": dry_run,
+                "scan": report.to_dict(),
+                "plan": plan.to_dict(),
+                "execution": [
+                    {"row": str(result.row), "ok": result.ok, "reason": result.reason} for result in results
+                ],
+            },
+        )
+        print(f"\nreport salvato: {path}")
+        return 0 if all(result.ok for result in results) else 1
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
+        return 1
+    except UpgradeEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -366,6 +500,29 @@ def build_parser() -> argparse.ArgumentParser:
     adb_check.add_argument("--adb", default=None)
     adb_check.add_argument("--serial", default="localhost:6520")
     adb_check.set_defaults(func=cmd_adb_check)
+
+    upgrade_scan = sub.add_parser(
+        "upgrade-scan",
+        help="scansiona il menu Build e stampa il piano di upgrade (sola lettura, nessuna spesa)",
+    )
+    upgrade_scan.add_argument("--config", default="config/config.example.yaml")
+    upgrade_scan.add_argument("--max-scrolls", type=int, default=None, help="limite posizioni di scroll")
+    upgrade_scan.add_argument("--out", default=None, help="file JSON del report (default out/upgrade/scan-<ts>.json)")
+    upgrade_scan.set_defaults(func=cmd_upgrade_scan)
+
+    upgrade_run = sub.add_parser(
+        "upgrade-run",
+        help="scansiona, pianifica ed esegue gli upgrade (dry-run di default; --execute spende risorse)",
+    )
+    upgrade_run.add_argument("--config", default="config/config.example.yaml")
+    upgrade_run.add_argument("--max-scrolls", type=int, default=None)
+    upgrade_run.add_argument("--out", default=None)
+    upgrade_run.add_argument(
+        "--execute",
+        action="store_true",
+        help="esegue davvero gli upgrade (preme CONFIRM: spende risorse). Default: dry-run.",
+    )
+    upgrade_run.set_defaults(func=cmd_upgrade_run)
 
     return parser
 

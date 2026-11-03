@@ -6,7 +6,7 @@
 
 Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`](../progetto-bot-coc/00-PIANO-GENERALE.md).
 
-## Decisioni correnti (3 novembre 2026 — aggiornate 13:35)
+## Decisioni correnti (3 novembre 2026 — aggiornate 15:15)
 
 | Tema | Decisione |
 |---|---|
@@ -24,7 +24,8 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
 | **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
 | **Builder/mura** | Preset **A**: 1 builder libero riservato alle mura (upgrade istantaneo); passaggio automatico a **B** quando tutte le mura sono max (tutti i builder lavorano). Config `walls.*`. |
-| **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: è il catalogo nativo del gioco (nome, livello, costo, valuta, tempo, affordability), **eroi inclusi**. L'engine legge la lista, filtra per risorse−riserve, builder liberi e priorità, e conferma solo "Upgrade" (mai "Finish Now"/gemme). Hero Hall resta **opzionale** (dettagli/equipaggiamento). Nessun livello/costo hardcoded. |
+| **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: è il catalogo nativo del gioco (nome, livello, costo, valuta, tempo, affordability), **eroi inclusi**. L'engine legge la lista, filtra per risorse−riserve, builder liberi e priorità, e conferma solo "Upgrade" (mai "Finish Now"/gemme). Hero Hall resta **opzionale** (dettagli/equipaggiamento). Nessun livello/costo hardcoded. Vedi [ADR-004](docs/ADR-004-vision-ocr-engine-upgrade.md). |
+| **Vision/OCR** | Testo con **OCR** (`rapidocr` + `onnxruntime`, extra `ocr`); UI con euristiche cromatiche/geometriche. Geometria in frazioni del frame (windowed e fullscreen). OCR solo sul pannello Build e solo quando serve (~0,93 s/schermata; scansione completa ~34 s). Nomi/valute non riconosciuti → riga **scartata** (mai indovinare). Immagini di gioco **non versionate** (dati account). |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
 
 ## Stato
@@ -41,17 +42,22 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Fullscreen verificato**: client 2452×1379, frame WGC 2452×1408, crop (0,29), mappatura tap corretta (match 0,967)
 - [x] **Gate pannello**: niente tap a vuoto se nella zona basso-centro è aperto un pannello info
 - [x] **Prima sessione dataset** (`tools/record_session.py`): 11 frame etichettati (home, Build, Battle, Town Hall 12, Wall, Bomb) + contact sheet per review manuale
-- [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, Wall Upgrader, upgrade confirm, eventi)
-- [ ] Auto-riconoscimento livelli (TH, eroi via Hero Hall, mura, esercito) tramite visione/OCR
+- [x] **Dataset windowed menu Build**: scroll completo (21 posizioni), dialoghi di conferma upgrade, modalità piazzamento "New building" salvati in `dataset/build-win-20261103/` (locale, gitignored)
+- [x] **Vision + OCR** (ADR-004): parser testo (importi/tempi/livelli/nomi), primitive UI (Build/Battle, X menu/dialogo, CONFIRM verde, modal inattività, piazzamento), lettura righe menu Build con merge delle letture, classifier stati (`home`, `build_menu`, `upgrade_confirm`, `placement`, `network_error`)
+- [x] **Engine upgrade — scansione e piano** (`upgrade-scan`): legge tutto il catalogo (~62 righe in ~34 s) e HUD (risorse + builder), filtra per priorità/riserve/builder, piano dry-run verificato a runtime (zero spese)
+- [ ] **Engine upgrade — esecuzione reale** (`upgrade-run --execute`): implementata e con verifiche (titolo/livello/costo, builder, risorse) ma **mai eseguita**: da validare in sessione dedicata
+- [ ] **Input non invasivo dopo reload**: dopo la ricarica per inattività i messaggi Win32 risultano ignorati in modo intermittente (rotta di indagine aperta)
+- [x] **Riconoscimento modal inattività** ("Anyone there? / RELOAD GAME"): il bot si ferma e lo segnala (reload automatico non abilitato)
+- [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, Wall Upgrader, eventi)
+- [ ] Wall upgrader runtime + preset A/B (config pronta, logica da implementare)
 - [ ] Loop attacco (skip + dragon spam)
-- [ ] Upgrade + wall check + GemGuard
 - [ ] GUI PySide6 completa
 
 ## Quick start
 
 ```powershell
-# 0) dipendenze + extra WGC (windows-capture)
-python -m pip install -e ".[dev,wgc]"
+# 0) dipendenze + extra WGC (windows-capture) + OCR (rapidocr/onnxruntime)
+python -m pip install -e ".[dev,wgc,ocr]"
 
 # 1) controlla che la finestra del gioco sia aperta (non minimizzata)
 python -m cocbot probe
@@ -71,10 +77,17 @@ python -m cocbot bench --seconds 20 --fps 5
 # 6) GUI minimale: Start/Stop + hotkey Ctrl+Alt+L / kill switch Ctrl+Alt+K
 python -m cocbot gui
 
-# 7) registra un dataset di schermate etichettate (gioco in fullscreen, tap non invasivi)
+# 7) scansiona il menu Build e stampa il piano di upgrade (SOLA LETTURA, nessuna spesa)
+python -m cocbot upgrade-scan                # report JSON in out/upgrade/
+
+# 8) esegue gli upgrade pianificati (DRY-RUN di default; --execute preme CONFIRM e spende)
+python -m cocbot upgrade-run                 # dry-run
+python -m cocbot upgrade-run --execute       # attenzione: spend e risorse
+
+# 9) registra un dataset di schermate etichettate (gioco in fullscreen, tap non invasivi)
 python tools/record_session.py            # output in dataset/raw-<data>/ con contact-sheet.jpg
 
-# 8) backend ADB opzionale (se installi il Developer Emulator)
+# 10) backend ADB opzionale (se installi il Developer Emulator)
 python -m cocbot adb-check
 ```
 
@@ -88,11 +101,18 @@ python -m cocbot adb-check
 config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrade, mura, GUI, humanize)
 src/cocbot/
   __main__.py                CLI: probe | capture | input-test | gui | bench | config-check | adb-check
+                             | upgrade-scan | upgrade-run
   app/controller.py          ciclo start/stop, cattura, pause, tap a vuoto umanizzati
+  app/upgrade_engine.py      engine upgrade: HUD, scansione menu Build, planner, esecuzione verificata
   core/                      tipi e contratti (ScreenSource, InputSink, Device)
   config/                    modelli pydantic + loader
   safety/humanize.py         humanization/anti-ban: ritmi, pause, rate limit, avvisi
   vision/safe_tap.py         euristiche: erba sicura per tap a vuoto + "sembra home"
+  vision/ocr.py              wrapper OCR opzionale (rapidocr), TextItem con bounding box
+  vision/textparse.py        parsing importi/tempi/livelli/nomi ("Wall x 284", "2h 30m")
+  vision/ui.py               primitive UI: pulsanti, X, CONFIRM, modal inattività, pannello righe
+  vision/build_menu.py       lettura righe menu Build (livello/tempo/costo/valuta) + dialogo conferma
+  vision/states.py           classifier stato schermo (home/build_menu/upgrade_confirm/...)
   gui/                       GUI minimale tkinter + hotkey globali
   capture/
     win32.py                 wrapper ctypes (DPI, finestre, input SendInput e messaggi Win32)
@@ -104,10 +124,15 @@ src/cocbot/
     adb.py                   backend ADB (Developer Emulator / emulatori Android)
 docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
 docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
-tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey, vision)
+docs/ADR-004-...             vision/OCR + geometria menu Build + engine upgrade (evidenze e limiti)
+tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey,
+                             vision/parser, dataset reale locale, planner/merge upgrade)
 tools/                       record_session.py (dataset), poc_wgc.py, poc_bg_input.py
 dataset/                     sessioni dataset locali (IGNORATA da git: contiene dati account)
 ```
+
+> Nota: i test che leggono i frame reali del menu Build si **saltano** se `dataset/` non c'è
+> (screenshot gitignored). I test di geometria/classifier usano frame sintetici.
 
 
 ## Note di sicurezza
