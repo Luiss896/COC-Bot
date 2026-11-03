@@ -16,12 +16,19 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Account** | Si usa l'account **esistente** dell'utente (non dedicato): rischio ban dichiarato e accettato. |
 | **Priorità** | Bot funzionante prima; materiale d'esame dopo (non guida le scelte tecniche). |
 | **Sicurezza** | `dry_run` di default; GemGuard (mai gemme); kill switch; niente IAP; niente guerre/CWL. |
+| **Avvio del gioco** | **Manuale** dell'utente: il bot rileva la finestra di gioco già aperta e si aggancia; **non avvia** GPGPC né il gioco. |
+| **Avvio/stop del bot** | **Manuale**, da GUI con hotkey globale configurabile ("tipo Ctrl+L"; default proposto `Ctrl+Alt+L` per non rubare scorciatoie ai browser). |
+| **Zero interferenza** | Il bot deve girare **mentre il PC è in uso**, senza rubare focus/mouse/tastiera. Richiede input non invasivo: POC sul consumer GPGPC; fallback **Developer Emulator + ADB**. |
+| **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** automatico quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
+| **Backup git** | Remote da configurare (approvato); al momento `cocbot/` ha solo commit locali e nessun `origin`. |
 
 ## Stato
 
 - [x] Piano completo (7 documenti) in `../progetto-bot-coc/`
 - [x] POC: finestra gioco GPGPC consumer individuata (`crosvm`, 16:9, DPI 125%), input `SendInput` verificato, cattura foreground funzionante, `PrintWindow` scartato (contenuto non affidabile)
 - [x] Scaffold repo: config, tipi/contratti, finestra, input, cattura mss, backend ADB, CLI
+- [ ] GUI minimale (start/stop + hotkey globale + stato)
+- [ ] POC input non invasivo sul consumer (o Developer Emulator + ADB) per girare senza interferire
 - [ ] POC Windows Graphics Capture (WGC) ≥10 FPS
 - [ ] Dataset schermate (EN) + classifier stati
 - [ ] Loop attacco (skip + dragon spam)
