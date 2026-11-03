@@ -39,7 +39,8 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Impatto misurato** (`bench`): **6,6% di un core**, ~74 MB RAM, cattura 5 FPS → non interferisce
 - [x] **Fullscreen verificato**: client 2452×1379, frame WGC 2452×1408, crop (0,29), mappatura tap corretta (match 0,967)
 - [x] **Gate pannello**: niente tap a vuoto se nella zona basso-centro è aperto un pannello info
-- [ ] Dataset schermate (EN) + classifier stati
+- [x] **Prima sessione dataset** (`tools/record_session.py`): 11 frame etichettati (home, Build, Battle, Town Hall 12, Wall, Bomb) + contact sheet per review manuale
+- [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, Wall Upgrader, upgrade confirm, eventi)
 - [ ] Auto-riconoscimento livelli (TH, eroi via Hero Hall, mura, esercito) tramite visione/OCR
 - [ ] Loop attacco (skip + dragon spam)
 - [ ] Upgrade + wall check + GemGuard
@@ -69,7 +70,10 @@ python -m cocbot bench --seconds 20 --fps 5
 # 6) GUI minimale: Start/Stop + hotkey Ctrl+Alt+L / kill switch Ctrl+Alt+K
 python -m cocbot gui
 
-# 7) backend ADB opzionale (se installi il Developer Emulator)
+# 7) registra un dataset di schermate etichettate (gioco in fullscreen, tap non invasivi)
+python tools/record_session.py            # output in dataset/raw-<data>/ con contact-sheet.jpg
+
+# 8) backend ADB opzionale (se installi il Developer Emulator)
 python -m cocbot adb-check
 ```
 
@@ -100,7 +104,8 @@ src/cocbot/
 docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
 docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
 tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey, vision)
-tools/                       POC (poc_wgc.py, poc_bg_input.py); in arrivo record_session, calibrate
+tools/                       record_session.py (dataset), poc_wgc.py, poc_bg_input.py
+dataset/                     sessioni dataset locali (IGNORATA da git: contiene dati account)
 ```
 
 

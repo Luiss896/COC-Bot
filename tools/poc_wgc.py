@@ -115,12 +115,14 @@ def run_capture(hwnd: int, seconds: float, out_dir: Path, save_every_s: float) -
     elapsed = max(1e-6, (stats["last_ts"] - stats["first_ts"])) if stats["first_ts"] and stats["last_ts"] else 0.0
     fps = stats["frames"] / elapsed if elapsed > 0 else 0.0
     mean_interval = float(np.mean(stats["intervals"])) if stats["intervals"] else 0.0
-    mean_luma = 0.0  # non ricostruito: i frame non vengono conservati
 
     print("== POC WGC (sola lettura) ==")
     print(f"hwnd=0x{hwnd:X} | durata richiesta={seconds:.1f}s")
     print(f"frame acquisiti: {stats['frames']} | FPS (su intervallo frame): {fps:.2f}")
-    print(f"intervallo medio: {mean_interval * 1000:.2f} ms | frame neri: {stats['black']} | frame identici consecutivi: {stats['identical']}")
+    print(
+        f"intervallo medio: {mean_interval * 1000:.2f} ms | frame neri: {stats['black']} | "
+        f"frame identici consecutivi: {stats['identical']}"
+    )
     print(f"chiusura finestra durante il test: {stats['closed']} | errori: {stats['error']}")
     print(f"frame salvati: {len(stats['saved'])} in {out_dir}")
     for path in stats["saved"]:
