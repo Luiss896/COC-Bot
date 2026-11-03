@@ -53,15 +53,15 @@ def _scene_dialog() -> np.ndarray:
 def _scene_placement() -> np.ndarray:
     image = _scene_home()
     x, y = int(WIDTH * 0.469), int(HEIGHT * 0.286)
-    cv2.circle(image, (x, y), 22, RED_BGR, -1)  # X piazzamento
-    cv2.circle(image, (x + int(WIDTH * 0.067), y), 20, (235, 235, 235), -1)  # spunta chiara
+    cv2.circle(image, (x, y), 36, RED_BGR, -1)  # X piazzamento (~72 px come il reale)
+    cv2.circle(image, (x + int(WIDTH * 0.067), y), 30, (235, 235, 235), -1)  # spunta chiara grande
     return image
 
 
 def _scene_home_with_red_decoration() -> np.ndarray:
     """Home con una decorazione rossa dove starebbe la X: NON deve sembrare piazzamento."""
     image = _scene_home()
-    cv2.circle(image, (int(WIDTH * 0.469), int(HEIGHT * 0.286)), 22, RED_BGR, -1)
+    cv2.circle(image, (int(WIDTH * 0.469), int(HEIGHT * 0.286)), 36, RED_BGR, -1)
     return image
 
 

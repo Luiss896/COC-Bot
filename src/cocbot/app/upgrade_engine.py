@@ -32,15 +32,16 @@ import numpy as np
 from cocbot.capture import win32
 from cocbot.capture.input_winmsg import WinMsgSink
 from cocbot.capture.screen_wgc import WgcScreenSource
-from cocbot.capture.window import GameWindow
-from cocbot.config.models import Config
+from cocbot.capture.window import GameWindow, find_game_window
+from cocbot.config.models import Config, WallMode
 from cocbot.core.types import ScreenState
 from cocbot.vision import build_menu, states, textparse, ui
 from cocbot.vision import ocr as ocr_module
 
 WM_MOUSEWHEEL = 0x020A
 
-DEFAULT_PRIORITY = ("heroes", "army", "defense", "resources", "walls", "other")
+# priorita' predefinita scelta dall'utente (3 nov 2026): mura -> difese -> offensiva -> eroi
+DEFAULT_PRIORITY = ("walls", "defense", "army", "heroes", "resources", "other")
 
 # categorie per parola chiave nel nome (minuscolo). "other" = riconosciuto ma non prioritario.
 CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -365,9 +366,13 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
         if row.is_new:
             plan.skipped.append(SkippedRow(row, "edificio nuovo: flusso piazzamento non supportato"))
             continue
-        if category == "walls" and not config.upgrade.include_walls:
-            plan.skipped.append(SkippedRow(row, "mura escluse (upgrade.include_walls=false)"))
-            continue
+        if category == "walls":
+            if not config.upgrade.include_walls:
+                plan.skipped.append(SkippedRow(row, "mura escluse (upgrade.include_walls=false)"))
+                continue
+            if config.walls.mode is WallMode.OFF:
+                plan.skipped.append(SkippedRow(row, "mura disabilitate (walls.mode=off)"))
+                continue
         if category == "heroes" and not config.upgrade.use_heroes:
             plan.skipped.append(SkippedRow(row, "eroi esclusi (upgrade.use_heroes=false)"))
             continue
@@ -400,20 +405,49 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
 
     plan.candidates.sort(key=lambda item: (item.priority_index, item.row.scroll_index or 0))
     limit = max(1, int(config.upgrade.max_upgrades_per_cycle))
-    affordable = [candidate for candidate in plan.candidates if report.hud.has_free_builder]
-    plan.chosen = affordable[:limit]
-    if len(plan.candidates) > len(affordable):
-        plan.notes.append("candidati oltre il limite di builder liberi")
-    if len(affordable) > limit:
-        plan.notes.append(f"limite max_upgrades_per_cycle={limit}: scelti i primi {limit}")
+    wall_limit = max(0, int(config.walls.max_wall_batches_per_cycle))
+    if not report.hud.has_free_builder:
+        return plan
+    # budget cumulativo: ogni upgrade scelto consuma risorse (le mura costano una per volta)
+    remaining: dict[str, int | None] = {
+        currency: report.hud.amount(currency) for currency in ("gold", "elixir", "dark")
+    }
+    chosen: list[UpgradeCandidate] = []
+    wall_count = 0
+    for candidate in plan.candidates:
+        if len(chosen) >= limit:
+            break
+        row = candidate.row
+        if row.cost is None:
+            continue
+        if candidate.category == "walls" and wall_count >= wall_limit:
+            plan.notes.append(f"limite walls.max_wall_batches_per_cycle={wall_limit}: mura oltre il limite")
+            continue
+        available = remaining.get(row.currency)
+        reserve = int(reserves.get(row.currency, 0))
+        if available is None or row.cost + reserve > available:
+            plan.notes.append(
+                f"budget {row.currency} esaurito: salto {row.name} (serve {row.cost} + riserva {reserve})"
+            )
+            continue
+        chosen.append(candidate)
+        remaining[row.currency] = available - row.cost
+        if candidate.category == "walls":
+            wall_count += 1
+    plan.chosen = chosen
+    if plan.candidates and not chosen:
+        plan.notes.append("nessun candidato scelto: budget/limiti non consentono upgrade")
     return plan
 
 
 class UpgradeEngine:
     """Naviga il menu Build, pianifica ed esegue upgrade (dry-run di default).
 
-    Non possiede il ciclo di vita del gioco: si aspetta che il gioco sia aperto e non
-    minimizzato. Non ruba focus ne' muove il cursore (input via ``WinMsgSink``).
+    Non avvia il gioco: si aspetta che sia aperto. Gestisce pero' i casi in cui la
+    finestra e' minimizzata (ripristino con ``ShowWindow``) e la disconnessione per
+    inattivita' (preme ``RELOAD GAME`` e attende il caricamento), perche' durante una
+    sessione lunga il gioco puo' disconnettersi da solo.
+    Input via ``WinMsgSink``: non ruba focus ne' muove il cursore.
     """
 
     def __init__(
@@ -451,8 +485,43 @@ class UpgradeEngine:
         self.close()
 
     # ------------------------------------------------------------------ input/capture
+    def _rebind_window(self, info: win32.WindowInfo) -> None:
+        """Riaggancia finestra/sorgente dopo una ricreazione (es. reload del gioco)."""
+        self.log(f"finestra riagganciata: hwnd=0x{info.hwnd:X} client={info.client_size}")
+        if self._own_source:
+            self.source.close()
+            self.window = GameWindow(info)
+            self.source = WgcScreenSource(self.window, target_fps=self.config.capture.target_fps)
+        else:
+            self.window = GameWindow(info)
+        if self._own_sink:
+            self.sink.window = self.window  # type: ignore[attr-defined]
+
+    def _ensure_window_ready(self, *, timeout_s: float = 120.0, poll_s: float = 1.0) -> bool:
+        """Attende che la finestra del gioco esista e non sia minimizzata (la ripristina)."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            info = find_game_window()
+            if info is not None:
+                if info.hwnd != self.window.hwnd or info.client_size != self.window.info.client_size:
+                    self._rebind_window(info)
+                if win32.is_minimized(info.hwnd):
+                    self.log("finestra minimizzata: ripristino (ShowWindow SW_RESTORE)")
+                    win32.user32.ShowWindow(win32.HWND(info.hwnd), win32.SW_RESTORE)
+                    time.sleep(0.8)
+                return True
+            time.sleep(poll_s)
+        return False
+
     def grab(self) -> np.ndarray:
         """Frame corrente (client-cropped). Errore se la finestra e' minimizzata/nera."""
+        info = find_game_window()
+        if info is None:
+            raise UpgradeEngineError("finestra di gioco non trovata")
+        if info.hwnd != self.window.hwnd or info.client_size != self.window.info.client_size:
+            self._rebind_window(info)
+        if win32.is_minimized(info.hwnd):
+            raise UpgradeEngineError("finestra del gioco minimizzata")
         frame = self.source.grab()
         image = frame.image
         if image is None or image.size == 0:
@@ -460,6 +529,57 @@ class UpgradeEngine:
         if frame.metadata.get("black"):
             raise UpgradeEngineError("frame nero: la finestra del gioco e' minimizzata o coperta in modo anomalo")
         return image
+
+    # ------------------------------------------------------------------ reload/attesa
+    def wait_for_load(self, *, timeout_s: float = 200.0, poll_s: float = 2.0) -> bool:
+        """Attende che il gioco finisca di caricare e arrivi in home (dopo un reload)."""
+        deadline = time.monotonic() + timeout_s
+        last_state: ScreenState | None = None
+        while time.monotonic() < deadline:
+            try:
+                frame = self.grab()
+            except UpgradeEngineError:
+                if not self._ensure_window_ready(timeout_s=8.0):
+                    time.sleep(poll_s)
+                continue
+            state = states.classify(frame)
+            if state is not last_state:
+                self.log(f"attesa caricamento: stato {state.value}")
+                last_state = state
+            if state is ScreenState.HOME:
+                return True
+            if state is ScreenState.NETWORK_ERROR:
+                point = ui.find_inactivity_modal(frame)
+                if point is not None:
+                    self._tap(point, wait_s=2.5)
+            time.sleep(poll_s)
+        self.log("attesa caricamento: timeout")
+        return False
+
+    def reload_game(self, *, timeout_s: float = 200.0) -> bool:
+        """Gestisce la disconnessione per inattivita': RELOAD GAME + attesa caricamento.
+
+        Nota: il reload puo' minimizzare la finestra; ``wait_for_load`` la ripristina.
+        """
+        self.log("disconnessione per inattivita': premo RELOAD GAME e attendo il caricamento")
+        if not self._ensure_window_ready(timeout_s=10.0):
+            self.log("reload: finestra di gioco non trovata")
+            return False
+        try:
+            frame = self.grab()
+        except UpgradeEngineError:
+            if not self._ensure_window_ready(timeout_s=10.0):
+                return False
+            try:
+                frame = self.grab()
+            except UpgradeEngineError:
+                return False
+        point = ui.find_inactivity_modal(frame)
+        if point is None:
+            self.log("reload: modal di inattivita' non rilevato")
+            return False
+        self._tap(point, wait_s=2.5)
+        return self.wait_for_load(timeout_s=timeout_s)
 
     def state(self, image: np.ndarray | None = None) -> ScreenState:
         return states.classify(image if image is not None else self.grab())
@@ -487,6 +607,54 @@ class UpgradeEngine:
         x0 = int(width * 0.735)
         diff = cv2.absdiff(first[:, x0:], second[:, x0:]).max(axis=2)
         return float(diff.mean())
+
+    def _settle_menu(
+        self,
+        *,
+        expect_change: bool = False,
+        timeout_s: float = 4.0,
+        poll_s: float = 0.15,
+        threshold: float = 0.4,
+    ) -> np.ndarray:
+        """Attende che la lista del menu Build smetta di animarsi e restituisce il frame.
+
+        Il gioco anima lo scroll per ~1.8 s: leggere o tappare prima porta a coordinate
+        sbagliate. Stabile = due frame consecutivi quasi identici nella zona pannello.
+        Con ``expect_change=True`` attende che almeno un frame sia cambiato (o fallisce
+        per timeout): serve a non fidarsi di frame WGC fermi/obsoleti.
+        """
+        previous = self.grab()
+        deadline = time.monotonic() + timeout_s
+        observed_change = not expect_change
+        stable_count = 0
+        while time.monotonic() < deadline:
+            time.sleep(poll_s)
+            current = self.grab()
+            changed = self._panel_delta(previous, current) >= threshold
+            if changed:
+                observed_change = True
+                stable_count = 0
+            else:
+                stable_count += 1
+            previous = current
+            if observed_change and stable_count >= 2:
+                return current
+        return self.grab()
+
+    def _wait_state(
+        self, expected: ScreenState, *, timeout_s: float = 3.0, poll_s: float = 0.2
+    ) -> np.ndarray | None:
+        """Attende uno stato specifico (polling dei frame) e restituisce il frame, o None."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            time.sleep(poll_s)
+            try:
+                frame = self.grab()
+            except UpgradeEngineError:
+                continue
+            if states.classify(frame) is expected:
+                return frame
+        return None
 
     # ------------------------------------------------------------------ HUD
     def read_hud(self, image: np.ndarray) -> HudRead:
@@ -535,9 +703,19 @@ class UpgradeEngine:
 
     # ------------------------------------------------------------------ stato/navigazione
     def recover_home(self, *, max_attempts: int = 6) -> bool:
-        """Riporta il gioco in home usando solo chiusure sicure (mai tap sulla mappa)."""
+        """Riporta il gioco in home usando solo chiusure sicure (mai tap sulla mappa).
+
+        Gestisce anche: finestra minimizzata (ripristino) e disconnessione per inattivita'
+        (RELOAD GAME + attesa caricamento).
+        """
         for _attempt in range(max_attempts):
-            image = self.grab()
+            try:
+                image = self.grab()
+            except UpgradeEngineError as exc:
+                if not self._ensure_window_ready(timeout_s=10.0):
+                    self.log(f"recover: {exc}")
+                    return False
+                continue
             state = states.classify(image)
             if state is ScreenState.HOME:
                 return True
@@ -548,8 +726,7 @@ class UpgradeEngine:
             elif state is ScreenState.BUILD_MENU:
                 point = ui.find_menu_close(image)
             elif state is ScreenState.NETWORK_ERROR:
-                self.log("recover: disconnessione per inattivita' — serve 'RELOAD GAME' (non automatico in v1)")
-                return False
+                return self.reload_game()
             else:
                 point = None
             if point is not None:
@@ -566,7 +743,10 @@ class UpgradeEngine:
             menu_close = ui.find_menu_close(menu_image)
             if menu_close is not None:
                 self._tap(menu_close)
-        return states.classify(self.grab()) is ScreenState.HOME
+        try:
+            return states.classify(self.grab()) is ScreenState.HOME
+        except UpgradeEngineError:
+            return False
 
     def open_build_menu(self) -> bool:
         """Apre il menu Build dalla home e verifica lo stato."""
@@ -582,7 +762,12 @@ class UpgradeEngine:
             self.log("open_build_menu: pulsante Build non trovato")
             return False
         self._tap(ui.center(button))
-        return states.classify(self.grab()) is ScreenState.BUILD_MENU
+        frame = self._wait_state(ScreenState.BUILD_MENU, timeout_s=4.0)
+        if frame is None:
+            self.log("open_build_menu: menu non rilevato dopo il tap")
+            return False
+        self._settle_menu()
+        return True
 
     def close_build_menu(self) -> bool:
         """Chiude il menu Build (o un dialogo) e verifica il ritorno in home."""
@@ -620,14 +805,19 @@ class UpgradeEngine:
         raise UpgradeEngineError("pannello del menu Build non rilevato")
 
     def scroll_to_top(self, *, max_steps: int = 45) -> int:
-        """Scorre la lista fino in cima (frame identici = cima). Ritorna i passi fatti."""
+        """Scorre la lista fino in cima (frame stabili identici = cima). Ritorna i passi fatti."""
         panel = self._current_panel()
         previous = self.grab()
         for step in range(max_steps):
             self._wheel(panel, +120)
-            time.sleep(self.scroll_wait_s)
-            current = self.grab()
+            current = self._settle_menu()
             still = self._panel_delta(previous, current) < 0.5
+            retries = 0
+            while still and retries < 2:  # frame puo' essere obsoleto: riprova
+                self._wheel(panel, +120)
+                current = self._settle_menu()
+                still = self._panel_delta(previous, current) < 0.5
+                retries += 1
             previous = current
             if still:
                 return step
@@ -662,9 +852,14 @@ class UpgradeEngine:
             for row in page:
                 raw_rows.append(replace(row, scroll_index=scroll_index))
             self._wheel(panel, -120)
-            time.sleep(self.scroll_wait_s)
-            current = self.grab()
+            current = self._settle_menu(expect_change=True)
             still = self._panel_delta(previous, current) < 0.5
+            retries = 0
+            while still and retries < 2:  # frame obsoleto: riprova lo scroll
+                self._wheel(panel, -120)
+                current = self._settle_menu(expect_change=True)
+                still = self._panel_delta(previous, current) < 0.5
+                retries += 1
             previous = current
             scroll_index += 1
             if still:
@@ -703,8 +898,147 @@ class UpgradeEngine:
                 break
         return results
 
+    def _find_row_live(self, target: build_menu.BuildRow, *, max_pages: int = 40) -> build_menu.BuildRow | None:
+        """Cerca la riga target scorrendo il menu Build dall'inizio (una pagina per volta)."""
+        self.scroll_to_top()
+        panel = self._current_panel()
+        previous = self._settle_menu()
+        for _page in range(max_pages):
+            for page_row in build_menu.read_rows(previous):
+                same_name = _normalize_name(page_row.name) == _normalize_name(target.name)
+                if same_name and page_row.cost == target.cost and page_row.currency == target.currency:
+                    return page_row
+            self._wheel(panel, -120)
+            current = self._settle_menu(expect_change=True)
+            still = self._panel_delta(previous, current) < 0.5
+            retries = 0
+            while still and retries < 2:  # frame WGC obsoleto: riprova
+                self._wheel(panel, -120)
+                current = self._settle_menu(expect_change=True)
+                still = self._panel_delta(previous, current) < 0.5
+                retries += 1
+            previous = current
+            if still:
+                break
+        return None
+
+    def _wait_wall_panel(self, *, timeout_s: float = 5.0, poll_s: float = 0.25) -> build_menu.WallPanelInfo | None:
+        """Attende che, dopo il tap sulla riga Wall, compaia il pannello azioni del muro."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                frame = self.grab()
+            except UpgradeEngineError:
+                time.sleep(poll_s)
+                continue
+            info = build_menu.read_wall_panel(frame)
+            if info.ok:
+                return info
+            time.sleep(poll_s)
+        return None
+
+    def _execute_wall_upgrade(self, candidate: UpgradeCandidate) -> ExecutionResult:  # pragma: no cover - live
+        """Upgrade di un muro dal pannello azioni ("Wall Upgrader"), con verifica delle risorse.
+
+        Flusso osservato: tap sulla riga "Wall x N" del menu Build -> il gioco seleziona un
+        muro e mostra Info / Select ROW / Upgrade MORE / Upgrade (oro) / Upgrade (elisir).
+        NON c'e' dialogo di conferma: si preme direttamente il pulsante "Upgrade" della
+        valuta scelta dal planner, poi si verificano livello selezionato e risorse.
+        Mai premere "Select ROW"/"Upgrade MORE" (modalita' bulk, costi multipli).
+        """
+        row = candidate.row
+        if row.cost is None or row.currency not in ("gold", "elixir"):
+            raise UpgradeEngineError(f"muro non eseguibile: costo/valuta non noti ({row})")
+        cost = row.cost
+        if not self.recover_home():
+            raise UpgradeEngineError("stato non home: esecuzione annullata")
+        before = self.read_hud(self.grab())
+        if not before.builders_known or not before.has_free_builder:
+            raise UpgradeEngineError("nessun builder libero verificato: esecuzione annullata")
+        if not self.open_build_menu():
+            raise UpgradeEngineError("menu Build non aperto")
+        match = self._find_row_live(row)
+        if match is None:
+            raise UpgradeEngineError(f"riga non ritrovata nella lista: {row.name} ({cost} {row.currency})")
+        self._tap((match.tap_x, match.tap_y), wait_s=1.2)
+        panel = self._wait_wall_panel()
+        if panel is None:
+            self.recover_home()
+            raise UpgradeEngineError("pannello azioni del muro non comparso: esecuzione annullata")
+        matching = [button for button in panel.buttons if button.cost == cost]
+        exact = [button for button in matching if button.currency == row.currency]
+        button = exact[0] if exact else (matching[0] if len(matching) == 1 else None)
+        if button is None:
+            self.recover_home()
+            raise UpgradeEngineError(
+                f"pulsante Upgrade muro ({cost} {row.currency}) non identificato: {panel.buttons}"
+            )
+        if button.currency not in ("gold", "elixir"):
+            self.recover_home()
+            raise UpgradeEngineError(f"valuta del pulsante muro non gestita: {button.currency}")
+        if button.currency != row.currency:
+            self.log(f"muro: uso la valuta del pulsante ({button.currency}) invece della riga ({row.currency})")
+        level_before = panel.selected_level
+        self.log(
+            f"muro livello {level_before}: premo Upgrade {button.currency} {cost} @ {button.point}"
+        )
+        self._tap(button.point, wait_s=1.2)
+        # dopo "Upgrade" compare un dialogo di conferma ("Upgrade Wall to Level N?"): va
+        # verificato e confermato SOLO se nome/livello/costo corrispondono al piano.
+        dialog_image = self._wait_state(ScreenState.UPGRADE_CONFIRM, timeout_s=4.0)
+        if dialog_image is None:
+            self.recover_home()
+            raise UpgradeEngineError("dialogo di conferma muro non comparso: esecuzione annullata")
+        dialog = build_menu.read_dialog(dialog_image)
+        expected_level = None if level_before is None else level_before + 1
+        problems: list[str] = []
+        if dialog.name is None or "wall" not in _normalize_name(dialog.name):
+            problems.append(f"nome dialogo {dialog.name!r} non contiene 'wall'")
+        if expected_level is not None and dialog.target_level is not None and dialog.target_level != expected_level:
+            problems.append(f"livello dialogo {dialog.target_level} diverso da {expected_level}")
+        if dialog.cost is None or dialog.cost != cost:
+            problems.append(f"costo dialogo {dialog.cost} diverso da {cost}")
+        if problems:
+            if dialog.close_point is not None:
+                self._tap(dialog.close_point)
+            self.recover_home()
+            raise UpgradeEngineError("dialogo muro non corrispondente: " + "; ".join(problems))
+        confirm_rect = dialog.confirm_rect or ui.find_confirm_button(dialog_image)
+        if confirm_rect is None:
+            self.recover_home()
+            raise UpgradeEngineError("pulsante CONFIRM del muro non trovato")
+        self.log(f"muro: confermo Upgrade (dialogo {dialog.title!r}, costo {dialog.cost})")
+        self._tap(ui.center(confirm_rect), wait_s=1.8)
+        for _attempt in range(6):
+            if states.classify(self.grab()) is not ScreenState.UPGRADE_CONFIRM:
+                break
+            time.sleep(0.3)
+        if not self.close_build_menu():
+            raise UpgradeEngineError("menu Build non chiuso dopo l'upgrade del muro")
+        after = self.read_hud(self.grab())
+        currency = button.currency
+        available_before = before.amount(currency)
+        available_after = after.amount(currency)
+        delta = None if available_before is None or available_after is None else available_before - available_after
+        if self.config.upgrade.verify_after_upgrade and (delta is None or delta != cost):
+            raise UpgradeEngineError(
+                f"verifica muro fallita: {currency} {available_before}->{available_after}, atteso -{cost}"
+            )
+        return ExecutionResult(
+            row=row,
+            ok=True,
+            reason=(
+                f"muro potenziato: livello selezionato {level_before}->{expected_level}, "
+                f"risorse -{cost} {currency} (verificate)"
+            ),
+            dialog_cost=dialog.cost,
+            hud_after=after,
+        )
+
     def _execute_upgrade(self, candidate: UpgradeCandidate) -> ExecutionResult:  # pragma: no cover - live
         """Naviga alla riga, verifica il dialogo e conferma l'upgrade."""
+        if candidate.category == "walls":
+            return self._execute_wall_upgrade(candidate)
         row = candidate.row
         if row.cost is None or row.currency not in ("gold", "elixir", "dark"):
             raise UpgradeEngineError(f"candidato non eseguibile: costo/valuta non noti ({row})")
@@ -716,28 +1050,12 @@ class UpgradeEngine:
             raise UpgradeEngineError("nessun builder libero verificato: esecuzione annullata")
         if not self.open_build_menu():
             raise UpgradeEngineError("menu Build non aperto")
-        self.scroll_to_top()
-        panel = self._current_panel()
-        for _step in range(row.scroll_index or 0):
-            self._wheel(panel, -120)
-            time.sleep(self.scroll_wait_s)
-        image = self.grab()
-        rows = build_menu.read_rows(image)
-        match = next(
-            (
-                page_row
-                for page_row in rows
-                if _normalize_name(page_row.name) == _normalize_name(row.name)
-                and page_row.cost == cost
-                and page_row.currency == row.currency
-            ),
-            None,
-        )
+        match = self._find_row_live(row)
         if match is None:
-            raise UpgradeEngineError(f"riga non ritrovata nella pagina: {row.name} ({cost} {row.currency})")
+            raise UpgradeEngineError(f"riga non ritrovata nella lista: {row.name} ({cost} {row.currency})")
         self._tap((match.tap_x, match.tap_y))
-        dialog_image = self.grab()
-        if states.classify(dialog_image) is not ScreenState.UPGRADE_CONFIRM:
+        dialog_image = self._wait_state(ScreenState.UPGRADE_CONFIRM, timeout_s=3.0)
+        if dialog_image is None:
             self.recover_home()
             raise UpgradeEngineError("dialogo di conferma non aperto: esecuzione annullata")
         dialog = build_menu.read_dialog(dialog_image)

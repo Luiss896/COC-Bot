@@ -416,6 +416,8 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
         for result in results:
             status = "OK" if result.ok else "FALLITO"
             print(f"  [{status}] {result.row} · {result.reason}")
+            if result.hud_after is not None:
+                print(f"      HUD dopo: {result.hud_after}")
         if not dry_run and results:
             print("ATTENZIONE: esecuzione reale richiesta. Verifica HUD/builder nel report.")
         path = save_json(

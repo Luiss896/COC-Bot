@@ -70,13 +70,13 @@ def test_categorize_known_and_unknown() -> None:
 
 def test_priority_list_default_and_custom() -> None:
     config = Config()
-    assert priority_list(config)[:2] == ("heroes", "army")
+    assert priority_list(config)[:2] == ("walls", "defense")
     config.upgrade.priority = ["defense", "heroes"]
     ordered = priority_list(config)
     assert ordered[:2] == ("defense", "heroes")
     assert "walls" in ordered  # le categorie mancanti vengono appese
     config.upgrade.priority = ["categoria_inventata"]
-    assert priority_list(config) == ("heroes", "army", "defense", "resources", "walls", "other")
+    assert priority_list(config) == ("walls", "defense", "army", "heroes", "resources", "other")
 
 
 def test_build_plan_filters_and_ordering() -> None:
@@ -86,21 +86,46 @@ def test_build_plan_filters_and_ordering() -> None:
         _row("Cannon", cost=100_000, currency="gold", scroll_index=2),
         _row("Mortar", cost=200_000, currency="gold", scroll_index=3),
         _row("Army Camp", cost=2_250_000, currency="elixir"),  # elisir insufficiente
-        _row("Wall", cost=750_000, currency="elixir"),  # mura escluse
+        _row("Wall", cost=750_000, currency="elixir", level=13),  # mura: priorita' 1 (default)
         _row("Workshop", cost=1_200_000, currency="elixir", is_new=True),  # piazzamento
         _row("30M Os", cost=115_000, currency="gold"),  # nome non riconosciuto
         _row("Crafting Station", cost=4_000_000, currency="gold", scroll_index=4),
     ]
     plan = build_plan(Config(), _report(rows))
     chosen = [item.row.name for item in plan.chosen]
-    # priorita': heroes prima, poi defense; "other" (Crafting Station) dopo e oltre il limite
-    assert chosen == ["barbarian king", "archer tower", "cannon"]
+    # priorita' default utente: walls -> defense -> army -> heroes -> resources -> other
+    assert chosen == ["wall", "archer tower", "cannon"]
     reasons = " | ".join(skipped.reason for skipped in plan.skipped)
     assert "risorse insufficienti" in reasons
-    assert "mura escluse" in reasons
     assert "edificio nuovo" in reasons
     assert "nome non riconosciuto" in reasons
     assert plan.scanned_rows == len(rows)
+
+
+def test_build_plan_walls_can_be_disabled() -> None:
+    config = Config()
+    config.upgrade.include_walls = False
+    rows = [_row("Wall", cost=750_000, currency="elixir"), _row("Archer Tower", cost=800_000, currency="gold")]
+    plan = build_plan(config, _report(rows))
+    reasons = " | ".join(skipped.reason for skipped in plan.skipped)
+    assert "mura escluse" in reasons
+    assert [item.row.name for item in plan.chosen] == ["archer tower"]
+
+
+def test_build_plan_wall_limit_and_cumulative_budget() -> None:
+    config = Config()
+    config.upgrade.max_upgrades_per_cycle = 5
+    config.walls.max_wall_batches_per_cycle = 2  # solo 2 mura per ciclo anche con budget ampio
+    rows = [_row("Wall", cost=750_000, currency="elixir", scroll_index=index) for index in range(4)]
+    rich = _hud(elixir=3_000_000)
+    plan = build_plan(config, _report(rows, hud=rich))
+    assert sum(1 for item in plan.chosen if item.category == "walls") == 2
+    # budget cumulativo: con elisir 1 000 000 - riserva 200 000 -> una sola mura da 750 000
+    config2 = Config()
+    config2.upgrade.max_upgrades_per_cycle = 3
+    plan2 = build_plan(config2, _report(rows))
+    assert sum(1 for item in plan2.chosen if item.category == "walls") == 1
+    assert any("budget elixir" in note for note in plan2.notes)
 
 
 def test_build_plan_custom_priority_respected() -> None:
@@ -227,4 +252,7 @@ def test_default_config_is_dry_run() -> None:
     config = Config()
     assert config.upgrade.dry_run is True
     assert config.safety.never_spend_gems is True
-    assert config.upgrade.include_walls is False
+    assert config.upgrade.include_walls is True
+    assert config.upgrade.priority[0] == "walls"
+    assert config.attack.use_heroes is True
+    assert config.attack.heroes_require_ready is True

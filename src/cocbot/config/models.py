@@ -135,6 +135,10 @@ class EarlyExitConfig(BaseModel):
 
 class AttackConfig(BaseModel):
     strategy: str = "dragon_spam"
+    # strategia esercito: gli eroi vanno schierati? Se un eroe e' in upgrade non e'
+    # schierabile, quindi la strategia deve poterli escludere o attendere.
+    use_heroes: bool = True
+    heroes_require_ready: bool = True
     early_exit: EarlyExitConfig = Field(default_factory=EarlyExitConfig)
     max_battle_duration_s: int = Field(default=180, ge=30, le=300)
     retry_on_error: int = Field(default=2, ge=0, le=5)
@@ -153,9 +157,10 @@ class UpgradeConfig(BaseModel):
     enabled: bool = True
     preset: str = "balanced_th18"
     queue: list[dict[str, Any]] = Field(default_factory=list)
-    # ordine di priorita' delle categorie per il planner (prima = piu' importante)
+    # ordine di priorita' delle categorie per il planner (prima = piu' importante).
+    # Ordine scelto dall'utente (3 nov): mura -> difese -> offensiva -> eroi -> risorse.
     priority: list[str] = Field(
-        default_factory=lambda: ["heroes", "army", "defense", "resources", "walls", "other"]
+        default_factory=lambda: ["walls", "defense", "army", "heroes", "resources", "other"]
     )
     reserves: dict[str, int] = Field(
         default_factory=lambda: {"gold": 200_000, "elixir": 200_000, "dark": 3_000}
@@ -163,8 +168,8 @@ class UpgradeConfig(BaseModel):
     max_upgrades_per_cycle: int = Field(default=3, ge=1, le=10)
     use_lab: bool = True
     use_heroes: bool = True
-    # le mura restano escluse dalla v1 dell'engine (flusso wall upgrader non ancora validato)
-    include_walls: bool = False
+    # le mura sono supportate (flusso pannello azioni, validato il 3 nov): attive di default
+    include_walls: bool = True
     # dry-run: il planner legge la lista e stampa il piano, l'executor non preme CONFIRM
     dry_run: bool = True
     ignore_categories: list[str] = Field(default_factory=list)

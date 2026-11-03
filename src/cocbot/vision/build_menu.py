@@ -17,6 +17,7 @@ Strategia di lettura (verificata su frame reali windowed 1733x975):
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import cv2
@@ -124,6 +125,10 @@ def detect_currency(image: np.ndarray, icon_region: ui.Rect) -> str:
         "dark": int(np.count_nonzero((hue >= 100) & (hue <= 175) & (sat > 50) & (val < 115))),
     }
     best = max(scores, key=lambda key: scores[key])
+    # icona elisir = goccia magenta con ombre viola scure: se il magenta brillante e'
+    # abbondante rispetto alle ombre, e' elisir e non elisir nero (che e' quasi tutto scuro)
+    if best == "dark" and scores["elixir"] >= 50 and scores["elixir"] >= 0.35 * scores["dark"]:
+        best = "elixir"
     return best if scores[best] >= 25 else "unknown"
 
 
@@ -416,4 +421,115 @@ def read_dialog(
     return info
 
 
-__all__ = ["BuildRow", "CURRENCIES", "DialogInfo", "detect_currency", "read_dialog", "read_rows"]
+# ---------------------------------------------------------------------------
+# Pannello azioni del muro ("Wall Upgrader"): dopo il tap sulla riga Wall il gioco
+# seleziona un muro e mostra Info / Select ROW / Upgrade MORE / Upgrade (oro) / Upgrade (elisir).
+# ---------------------------------------------------------------------------
+_WALL_PANEL_REGION = (0.14, 0.68, 0.48, 0.28)  # (x, y, w, h) frazioni del frame
+_WALL_AMOUNT_ICON_DX = (0.001, 0.020)  # icona valuta subito a destra dell'importo (fraz. larghezza)
+_WALL_AMOUNT_ICON_HALF_H = 0.014  # mezza altezza icona (fraz. altezza)
+_WALL_MIN_COST = 1_000  # sotto questa soglia i numeri sono badge/rumore, non prezzi
+_WALL_LABEL_MAX_DX = 0.060  # allineamento orizzontale importo<->label "Upgrade" (fraz. larghezza)
+_WALL_LABEL_MAX_DY = 0.090  # distanza verticale importo->label (fraz. altezza)
+
+
+@dataclass(frozen=True, slots=True)
+class WallUpgradeButton:
+    """Pulsante "Upgrade" del pannello muro: costo, valuta e punto da tappare."""
+
+    cost: int
+    currency: str
+    point: tuple[int, int]
+
+
+@dataclass
+class WallPanelInfo:
+    """Contenuto del pannello azioni del muro (dopo tap sulla riga Wall)."""
+
+    ok: bool = False
+    selected_level: int | None = None
+    buttons: list[WallUpgradeButton] = field(default_factory=list)
+    select_row_point: tuple[int, int] | None = None
+    texts: list[TextItem] = field(default_factory=list)
+
+
+def _wall_currency_icon_region(image: np.ndarray, amount_item: TextItem) -> ui.Rect:
+    h, w = image.shape[:2]
+    x0 = min(w - 4, amount_item.x1 + int(w * _WALL_AMOUNT_ICON_DX[0]))
+    x1 = min(w - 1, amount_item.x1 + int(w * _WALL_AMOUNT_ICON_DX[1]))
+    half = max(6, int(h * _WALL_AMOUNT_ICON_HALF_H))
+    y0 = max(0, amount_item.cy - half)
+    y1 = min(h - 1, amount_item.cy + half)
+    return ui.Rect(x0, y0, max(0, x1 - x0), max(0, y1 - y0))
+
+
+def read_wall_panel(
+    image: np.ndarray,
+    *,
+    texts: list[TextItem] | None = None,
+    use_ocr: bool = True,
+) -> WallPanelInfo:
+    """Legge il pannello azioni del muro: livello selezionato e pulsanti Upgrade con valuta.
+
+    ``ok=True`` solo se sono stati riconosciuti almeno un importo e un'etichetta "Upgrade":
+    il chiamante deve comunque verificare che il costo/valuta corrispondano al piano.
+    """
+    info = WallPanelInfo()
+    if image is None or image.size == 0:
+        return info
+    if not use_ocr:
+        return info
+    h, w = image.shape[:2]
+    x, y, width, height = _WALL_PANEL_REGION
+    x0, y0 = int(x * w), int(y * h)
+    x1, y1 = min(w, int((x + width) * w)), min(h, int((y + height) * h))
+    if x1 - x0 < 40 or y1 - y0 < 40:
+        return info
+    crop = image[y0:y1, x0:x1]
+    items = texts if texts is not None else ocr_module.read_texts(crop, offset=(x0, y0))
+    info.texts = items
+    labels = [item for item in items if "upgrade" in textparse.normalize(item.text)]
+    if not labels:
+        return info
+    for item in items:
+        cost = textparse.parse_amount(item.text)
+        if cost is None or cost < _WALL_MIN_COST:
+            continue
+        # un pulsante valido ha la label "Upgrade" allineata sotto l'importo
+        label = next(
+            (
+                candidate
+                for candidate in labels
+                if abs(candidate.cx - item.cx) <= int(_WALL_LABEL_MAX_DX * w)
+                and 0 <= candidate.cy - item.cy <= int(_WALL_LABEL_MAX_DY * h)
+            ),
+            None,
+        )
+        if label is None:
+            continue
+        currency = detect_currency(image, _wall_currency_icon_region(image, item))
+        point = (item.cx, (item.y1 + label.y0) // 2)
+        info.buttons.append(WallUpgradeButton(cost=cost, currency=currency, point=point))
+    for item in items:
+        normalized = textparse.normalize(item.text)
+        if "select" in normalized and info.select_row_point is None:
+            info.select_row_point = (item.cx, item.cy + int(0.020 * h))
+        if "wall" in normalized and "level" in normalized:
+            match = re.search(r"level\s*(\d{1,2})", normalized)
+            if match:
+                info.selected_level = int(match.group(1))
+    info.ok = bool(info.buttons)
+    return info
+
+
+__all__ = [
+    "BuildRow",
+    "CURRENCIES",
+    "DialogInfo",
+    "WallPanelInfo",
+    "WallUpgradeButton",
+    "detect_currency",
+    "read_dialog",
+    "read_rows",
+    "read_wall_panel",
+]

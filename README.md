@@ -24,7 +24,10 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
 | **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
 | **Builder/mura** | Preset **A**: 1 builder libero riservato alle mura (upgrade istantaneo); passaggio automatico a **B** quando tutte le mura sono max (tutti i builder lavorano). Config `walls.*`. |
-| **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: è il catalogo nativo del gioco (nome, livello, costo, valuta, tempo, affordability), **eroi inclusi**. L'engine legge la lista, filtra per risorse−riserve, builder liberi e priorità, e conferma solo "Upgrade" (mai "Finish Now"/gemme). Hero Hall resta **opzionale** (dettagli/equipaggiamento). Nessun livello/costo hardcoded. Vedi [ADR-004](docs/ADR-004-vision-ocr-engine-upgrade.md). |
+| **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: catalogo nativo (nome, livello, costo, valuta, tempo), **eroi inclusi**. Engine: legge la lista, filtra per priorità/riserve/builder, conferma solo "Upgrade" (mai "Finish Now"/gemme). **Mura validate a runtime** (riga Wall → pannello azioni → Upgrade oro **o** elisir → dialogo conferma → CONFIRM; un muro reale potenziato 12→13 con verifica risorse). **Esecuzione reale edifici/eroi da validare**. Vedi [ADR-004](docs/ADR-004-vision-ocr-engine-upgrade.md). |
+| **Priorità upgrade** | Scelta utente (3 nov): **mura → difese → offensiva → eroi → risorse → other** (`upgrade.priority`); mura attive di default (`upgrade.include_walls: true`) con limite `walls.max_wall_batches_per_cycle` e budget cumulativo con riserve per valuta. |
+| **Disconnessione/inattività** | L'engine riconosce il modal "Anyone there?" e **gestisce da solo** `RELOAD GAME` + attesa caricamento + ripristino finestra se minimizzata. Nessun avvio automatico di GPGPC. |
+| **Strategia eroi (auto-battaglia)** | Opzioni pronte per il loop attacco: `attack.use_heroes` (schierare gli eroi) e `attack.heroes_require_ready` (un eroe in upgrade non è schierabile → escludi/attendi). Il loop battaglia non è ancora implementato. |
 | **Vision/OCR** | Testo con **OCR** (`rapidocr` + `onnxruntime`, extra `ocr`); UI con euristiche cromatiche/geometriche. Geometria in frazioni del frame (windowed e fullscreen). OCR solo sul pannello Build e solo quando serve (~0,93 s/schermata; scansione completa ~34 s). Nomi/valute non riconosciuti → riga **scartata** (mai indovinare). Immagini di gioco **non versionate** (dati account). |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
 
@@ -44,13 +47,15 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Prima sessione dataset** (`tools/record_session.py`): 11 frame etichettati (home, Build, Battle, Town Hall 12, Wall, Bomb) + contact sheet per review manuale
 - [x] **Dataset windowed menu Build**: scroll completo (21 posizioni), dialoghi di conferma upgrade, modalità piazzamento "New building" salvati in `dataset/build-win-20261103/` (locale, gitignored)
 - [x] **Vision + OCR** (ADR-004): parser testo (importi/tempi/livelli/nomi), primitive UI (Build/Battle, X menu/dialogo, CONFIRM verde, modal inattività, piazzamento), lettura righe menu Build con merge delle letture, classifier stati (`home`, `build_menu`, `upgrade_confirm`, `placement`, `network_error`)
-- [x] **Engine upgrade — scansione e piano** (`upgrade-scan`): legge tutto il catalogo (~62 righe in ~34 s) e HUD (risorse + builder), filtra per priorità/riserve/builder, piano dry-run verificato a runtime (zero spese)
-- [ ] **Engine upgrade — esecuzione reale** (`upgrade-run --execute`): implementata e con verifiche (titolo/livello/costo, builder, risorse) ma **mai eseguita**: da validare in sessione dedicata
-- [ ] **Input non invasivo dopo reload**: dopo la ricarica per inattività i messaggi Win32 risultano ignorati in modo intermittente (rotta di indagine aperta)
-- [x] **Riconoscimento modal inattività** ("Anyone there? / RELOAD GAME"): il bot si ferma e lo segnala (reload automatico non abilitato)
-- [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, Wall Upgrader, eventi)
-- [ ] Wall upgrader runtime + preset A/B (config pronta, logica da implementare)
+- [x] **Engine upgrade — scansione e piano** (`upgrade-scan`): legge tutto il catalogo (≈59 righe in 21 posizioni, ~87 s con stabilizzazione UI) e HUD (risorse + builder), filtra per priorità/riserve/builder, piano dry-run verificato a runtime (zero spese)
+- [x] **Engine upgrade — esecuzione reale (muro) VALIDATA a runtime**: riga Wall → pannello azioni → Upgrade elisir → dialogo di conferma verificato → CONFIRM; elisir 7 500 945 → 6 750 945 (−750 000), gemme invariate, builder 5/5, livello muro 12→13
+- [x] **Animazione UI gestita**: lo scroll del menu si anima ~1,8 s; engine attende la stabilizzazione (2 frame identici + verifica del cambio) prima di leggere/tappare — risolve le righe mappate su posizioni sbagliate
+- [x] **Auto-reload disconnessione**: modal inattività → `RELOAD GAME` → attesa caricamento (splash→home) → ripristino finestra se minimizzata (implementato; da esercitare su disconnessione reale)
+- [ ] **Esecuzione reale upgrade edificio/eroe** (riga → dialogo CONFIRM): stesso percorso del muro senza pannello azioni, ma non ancora eseguita
+- [x] **Opzioni eroi per auto-battaglia**: `attack.use_heroes` + `attack.heroes_require_ready` (config, pronte per il loop attacco)
+- [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
 - [ ] Loop attacco (skip + dragon spam)
+- [ ] Wall bulk (`Upgrade MORE`/`Select ROW`) — non supportato di proposito in v1
 - [ ] GUI PySide6 completa
 
 ## Quick start
@@ -124,9 +129,9 @@ src/cocbot/
     adb.py                   backend ADB (Developer Emulator / emulatori Android)
 docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
 docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
-docs/ADR-004-...             vision/OCR + geometria menu Build + engine upgrade (evidenze e limiti)
+docs/ADR-004-...             vision/OCR + geometria menu Build + engine upgrade (muri validati a runtime)
 tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey,
-                             vision/parser, dataset reale locale, planner/merge upgrade)
+                             vision/parser, dataset reale locale, planner/merge upgrade, pannello muro)
 tools/                       record_session.py (dataset), poc_wgc.py, poc_bg_input.py
 dataset/                     sessioni dataset locali (IGNORATA da git: contiene dati account)
 ```

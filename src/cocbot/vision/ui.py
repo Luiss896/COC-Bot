@@ -148,41 +148,46 @@ def find_placement_exit(image: np.ndarray) -> tuple[int, int] | None:
     """Centro della X rossa della modalita' piazzamento edificio, o ``None``.
 
     In modalita' piazzamento ci sono DUE pulsanti affiancati al centro-alto: X rossa a
-    sinistra e spunta chiara (grigio/bianco) a destra. La sola X rossa non basta: la mappa
-    contiene decorazioni rosse che generano falsi positivi, quindi si richiede anche la
-    spunta a destra, con dimensioni e forma plausibili per i due pulsanti.
+    sinistra e spunta chiara (cerchio grigio con check bianco) a destra. La sola X rossa
+    non basta: la mappa contiene decorazioni rosse (misurati falsi positivi), quindi si
+    richiede che la X abbia dimensioni/forma da pulsante e che a destra ci sia una zona
+    chiara estesa (la spunta). Geometria misurata sul frame reale: X ~72x69 px (0.041 W),
+    spunta a +0.065 W, frazione chiara nella zona destra ~0.39-0.43 (controllo sinistro ~0.17).
     """
     if not _valid(image):
         return None
     hsv = _hsv(image)
     mask = cv2.inRange(hsv, RED_RANGES[0][0], RED_RANGES[0][1]) | cv2.inRange(hsv, RED_RANGES[1][0], RED_RANGES[1][1])
     h, w = mask.shape[:2]
-    area_min = int(0.0008 * w * h)
-    area_max = int(0.0060 * w * h)
+    area_min = int(0.0013 * w * h)
+    area_max = int(0.0035 * w * h)
     for component in _components(mask, min_area=area_min):
         area, cx, cy, _x, _y, cw, ch = component
         if area > area_max or not (0.40 * w < cx < 0.55 * w and 0.20 * h < cy < 0.36 * h):
             continue
-        if ch <= 0 or not (0.6 <= cw / ch <= 1.6):
+        if ch <= 0 or not (0.85 <= cw / ch <= 1.35):
             continue
-        if _has_clear_check_marker(image, cx, cy):
+        if not (0.030 * w <= cw <= 0.050 * w):
+            continue
+        if _white_fraction_right_of(image, cx, cy) >= 0.30:
             return cx, cy
     return None
 
 
-def _has_clear_check_marker(image: np.ndarray, red_cx: int, red_cy: int) -> bool:
-    """True se a destra della X rossa c'e' il pulsante di spunta (chiaro e poco saturo)."""
+def _white_fraction_right_of(image: np.ndarray, red_cx: int, red_cy: int) -> float:
+    """Frazione di pixel chiari/poco saturi a destra della X (dove sta la spunta)."""
     h, w = image.shape[:2]
-    x0 = red_cx + int(0.035 * w)
-    x1 = red_cx + int(0.095 * w)
-    y0 = max(0, red_cy - int(0.030 * h))
-    y1 = min(h, red_cy + int(0.030 * h))
+    x0 = min(w - 2, int(red_cx + 0.030 * w))
+    x1 = min(w - 1, int(red_cx + 0.090 * w))
+    y0 = max(0, int(red_cy - 0.035 * h))
+    y1 = min(h - 1, int(red_cy + 0.035 * h))
     if x1 - x0 < 8 or y1 - y0 < 8:
-        return False
+        return 0.0
     hsv = _hsv(image)
-    region = hsv[y0:y1, x0:x1]
-    bright_neutral = cv2.inRange(region, (0, 0, 150), (180, 70, 255))
-    return int(bright_neutral.sum()) >= int(0.0006 * w * h)
+    region_sat = hsv[y0:y1, x0:x1, 1]
+    region_val = hsv[y0:y1, x0:x1, 2]
+    bright_neutral = (region_sat < 60) & (region_val > 170)
+    return float(bright_neutral.mean())
 
 
 def find_inactivity_modal(image: np.ndarray) -> tuple[int, int] | None:

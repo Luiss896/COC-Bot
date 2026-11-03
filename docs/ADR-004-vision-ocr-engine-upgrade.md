@@ -1,8 +1,9 @@
 # ADR-004 — Vision per il menu Build: OCR + euristiche geometriche, engine upgrade
 
-- **Data:** 2026-11-03
-- **Stato:** accettata; implementata e verificata a runtime per scansione/piano; esecuzione reale
-  degli upgrade **implementata ma mai eseguita** (dry-run di default).
+- **Data:** 2026-11-03 (agg. 15:40)
+- **Stato:** accettata; implementata e verificata a runtime per scansione/piano **ed esecuzione
+  reale del flusso muro** (un muro potenziato a runtime con verifica delle risorse).
+  L'esecuzione reale del dialogo upgrade di edifici/eroi standard resta da validare.
 - **Contesto:** serve leggere il menu Build ("Buildings & Heroes") per pianificare gli upgrade:
   nome, livello, tempo, costo e valuta di ogni riga, più risorse e builder liberi. Il menu è una
   lista lunga (~60 righe) con scroll sintetico, e contiene righe con descrizione/sottotitolo
@@ -39,6 +40,41 @@
 
 ## Evidenze (runtime, 3 nov 2026)
 
+### Aggiornamento 15:40 — flusso muro validato a runtime (esecuzione reale)
+
+- Tap sulla riga `Wall x 284` del menu Build → il gioco **non apre un dialogo**: seleziona un
+  muro e mostra il pannello azioni `Info / Select ROW / Upgrade MORE / Upgrade (oro) /
+  Upgrade (elisir)`. Il pannello offre **due Upgrade da 750 000**: uno in **oro**, uno in
+  **elisir** (le mura di questa versione si potenziano con entrambe le valute).
+- `read_wall_panel` (OCR della zona basso-centro) legge livello selezionato (12), importi e
+  **valuta del pulsante**; l'engine preme solo il pulsante della valuta scelta dal piano e
+  **mai** `Select ROW`/`Upgrade MORE` (bulk).
+- Dopo "Upgrade" compare **anche un dialogo di conferma** ("Upgrade Wall to Level 13?"):
+  l'engine verifica nome/livello/costo e preme il CONFIRM verde.
+- **Esecuzione reale verificata:** piano = `Wall x 284 · 750 000 elisir`; risultato:
+  elisir **7 500 945 → 6 750 945** (−750 000 esatti), oro invariato (7 323 700), **gemme
+  invariate (1 925)**, builder 5/5 (upgrade istantaneo), livello selezionato **12 → 13**.
+  Nessun tap su altre aree; menu chiuso e ritorno in home verificati.
+- Scansione completa con stabilizzazione UI: **59 righe in 21 posizioni in 87,7 s**.
+
+### Altri miglioramenti della stessa sessione
+
+- **Animazione dello scroll**: la lista Build si anima per **~1,8 s** dopo ogni evento
+  `WM_MOUSEWHEEL`; leggere/tappare prima produce righe mappate su posizioni sbagliate. Ora ogni
+  scroll attende la **stabilizzazione del pannello** (2 frame consecutivi quasi identici) e in
+  piu' verifica che il cambio sia avvenuto (con retry), sia in scansione sia in navigazione.
+- **Auto-reload disconnessione**: l'engine riconosce il modal di inattivita', preme
+  `RELOAD GAME`, attende il caricamento (splash → home, timeout ~200 s) e ripristina la finestra
+  se il reload l'ha minimizzata. Non ancora esercitato a runtime su una disconnessione reale.
+- **Priorita' aggiornate** (scelta utente): `walls → defense → army → heroes → resources →
+  other`; `upgrade.include_walls` ora **true** di default; mura limitate da
+  `walls.max_wall_batches_per_cycle` e dal budget cumulativo (riserve per valuta).
+- **Strategia eroi per la futura auto-battaglia**: `attack.use_heroes` e
+  `attack.heroes_require_ready` (se un eroe e' in upgrade non e' schierabile → la strategia lo
+  deve escludere/attendere).
+
+### Misure base (sessione precedente, riconfermate)
+
 - OCR pannello Build, scala 1×, `use_cls=False`: **929 ms**, 40 testi; nomi tutti corretti
   (`Barbarian King`, `Clan Castle`, `Elixir Collector x 7`, `Workshop`, `Inferno Tower`).
 - Lettura righe su frame reali windowed: BK `[lv 53] 44000 dark`, Clan Castle `[lv 8] 2 500 000
@@ -56,24 +92,28 @@
 
 - L'OCR windowed a volte non legge il tempo (`1d`) o sbaglia nomi (`30M Os`): mitigato con merge
   delle letture, allowlist e skip conservativo; in fullscreen la stessa riga era corretta.
-- L'**esecuzione reale** del CONFIRM non è mai stata eseguita (nessuna spesa): da validare in una
-  sessione dedicata con un upgrade economico e budget esplicito.
-- **Input via `PostMessage`**: dopo la ricarica del gioco per inattività, i messaggi sintetici
-  risultano ignorati in modo intermittente (un click reale via SendInput funziona; la finestra era
-  in foreground). Ipotesi: attivazione/focus della finestra o filtro anti-iniezione del client.
-  Da indagare: finché non è risolto, il backend non invasivo non è garantito per sessioni lunghe.
-- Modal inattività: riconosciuto (`NETWORK_ERROR`) e **non** viene premuto automaticamente
-  "RELOAD GAME" in v1; il bot si ferma e lo segnala.
-- Selettore di riga per "New building" e flusso wall-upgrader: catturati (dataset) ma non
-  implementati nell'engine.
+- **Esecuzione reale del dialogo upgrade standard** (edifici/eroi: riga → dialogo → CONFIRM): il
+  percorso è lo stesso del muro meno il pannello azioni, ma **non è ancora stato eseguito** su un
+  edificio reale. Il muro invece è validato (sopra).
+- **Input via `PostMessage`**: le intermittenze osservate a metà sessione erano dovute a un
+  **reload del gioco fatto dall'utente mentre i test giravano** (confermato dall'utente); dopo
+  il chiarimento i tap/scroll sintetici hanno funzionato per tutte le scansioni ed esecuzioni
+  successive. Resta da misurare l'affidabilità su sessioni molto lunghe.
+- **Reload automatico**: implementato ma non esercitato su una disconnessione reale.
+- Selettore di riga per "New building": catturato (dataset) ma non implementato nell'engine.
+- Modal inattività: riconosciuto (`NETWORK_ERROR`) e ora gestito con reload automatico.
+- I nomi delle righe con sottotitolo (Crafting Station) o con OCR sporco restano esclusi dal
+  piano (skip conservativo): il catalogo perde alcune righe reali.
 
 ## Conseguenze
 
-- Nuovi moduli: `vision/ocr.py`, `vision/textparse.py`, `vision/ui.py`, `vision/build_menu.py`,
-  `vision/states.py`, `app/upgrade_engine.py`.
+- Nuovi moduli: `vision/ocr.py`, `vision/textparse.py`, `vision/ui.py`, `vision/build_menu.py`
+  (incluso `read_wall_panel`), `vision/states.py`, `app/upgrade_engine.py` (incluso flusso muro,
+  auto-reload e stabilizzazione UI).
 - Nuove CLI: `cocbot upgrade-scan` (sola lettura) e `cocbot upgrade-run` (dry-run di default,
   `--execute` per spendere).
 - Extra opzionale `ocr` in `pyproject.toml` (`rapidocr>=3.10`, `onnxruntime>=1.20`); corretta
   la dipendenza precedente `rapidocr-onnxruntime>=1.3` che non esiste più su PyPI.
-- Config: nuovi campi `upgrade.priority`, `upgrade.dry_run`, `upgrade.include_walls`,
-  `upgrade.max_scan_scrolls`.
+- Config: `upgrade.priority` (default mura→difese→offensiva→eroi→risorse), `upgrade.include_walls`
+  (default true), `upgrade.dry_run`, `upgrade.max_scan_scrolls`, `attack.use_heroes`,
+  `attack.heroes_require_ready`.

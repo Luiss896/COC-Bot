@@ -1,4 +1,4 @@
-﻿"""Test delle primitive vision contro il dataset locale (skip se il dataset non c'e').
+"""Test delle primitive vision contro il dataset locale (skip se il dataset non c'e').
 
 Il dataset contiene screenshot dell'account dell'utente: e' gitignored e resta solo locale.
 Questi test servono a evitare regressioni nella lettura OCR del menu Build reale; in CI
@@ -101,6 +101,21 @@ def test_read_dialog_upgrade_confirm() -> None:
     assert dialog.confirm_rect is not None
     assert dialog.close_point is not None
     assert 0.85 * 1733 < dialog.close_point[0] < 0.92 * 1733
+
+
+def test_read_wall_panel() -> None:
+    from cocbot.vision import build_menu
+
+    info = build_menu.read_wall_panel(_load("wall-upgrader-panel.png"))
+    assert info.ok
+    assert info.selected_level == 12
+    assert info.select_row_point is not None
+    buttons = {(button.cost, button.currency) for button in info.buttons}
+    assert (750_000, "gold") in buttons
+    assert (750_000, "elixir") in buttons
+    for button in info.buttons:
+        assert 0 < button.point[0] < 1733
+        assert 0 < button.point[1] < 975
 
 
 def test_classify_real_frames() -> None:
