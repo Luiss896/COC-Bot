@@ -20,6 +20,8 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Avvio/stop del bot** | **Manuale**, da GUI con hotkey globale configurabile: default `Ctrl+Alt+L` (config `gui.hotkey_start_stop`). |
 | **Zero interferenza** | **Validato**: WGC cattura anche coperta (47,4 FPS, 0 neri) e i click via messaggi aprono/chiudono pannelli **senza cambiare foreground né cursore**. |
 | **Vincolo finestra** | Il gioco **non deve essere minimizzato** (WGC non cattura finestre minimizzate): il bot va in pausa. Coperta sì; fullscreen borderless da testare. |
+| **Anti-ban/humanization** | Ritmi variabili, pause random, tap a vuoto **solo su erba vuota** (mai gemme/shop), rate limit, avvisi anti-ban in GUI; **non garantisce** l'immunità dal ban. Vedi [ADR-003](docs/ADR-003-humanization-antiban.md). |
+| **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
 | **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
 | **Builder/mura** | Preset **A**: 1 builder libero riservato alle mura (upgrade istantaneo); passaggio automatico a **B** quando tutte le mura sono max (tutti i builder lavorano). Config `walls.*`. |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
@@ -32,11 +34,14 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **POC WGC ≥10 FPS**: 47,4 FPS sulla finestra anche coperta, 0 frame neri (vedi ADR-002)
 - [x] **POC input non invasivo**: click via messaggi Win32 senza focus/cursore; apre e chiude pannelli
 - [x] **Moduli produzione**: `WgcScreenSource` (crop area client) + `WinMsgSink` (coordinate canoniche), CLI aggiornata, test
-- [ ] GUI minimale (start/stop + hotkey globale + stato)
+- [x] **GUI minimale** (tkinter): Start/Stop, hotkey `Ctrl+Alt+L` / kill switch `Ctrl+Alt+K`, stato e avvisi anti-ban
+- [x] **Humanization/anti-ban**: ritmi variabili, pause random, tap a vuoto solo su erba vuota, rate limit, avvisi
+- [x] **Impatto misurato** (`bench`): **6,6% di un core**, ~74 MB RAM, cattura 5 FPS → non interferisce
+- [ ] Test del passaggio a fullscreen (requisito utente: non deve rompersi)
 - [ ] Dataset schermate (EN) + classifier stati
 - [ ] Loop attacco (skip + dragon spam)
 - [ ] Upgrade + wall check + GemGuard
-- [ ] GUI PySide6
+- [ ] GUI PySide6 completa
 
 ## Quick start
 
@@ -56,7 +61,13 @@ python -m cocbot capture --seconds 4 --fps 10 --backend wgc --out out/captures
 # 4) verifica un tap non invasivo (dry-run; --execute per inviarlo davvero)
 python -m cocbot input-test --x 960 --y 540
 
-# 5) backend ADB opzionale (se installi il Developer Emulator)
+# 5) misura l'impatto del bot (CPU/RAM/FPS, sola lettura)
+python -m cocbot bench --seconds 20 --fps 5
+
+# 6) GUI minimale: Start/Stop + hotkey Ctrl+Alt+L / kill switch Ctrl+Alt+K
+python -m cocbot gui
+
+# 7) backend ADB opzionale (se installi il Developer Emulator)
 python -m cocbot adb-check
 ```
 
@@ -67,11 +78,15 @@ python -m cocbot adb-check
 ## Struttura
 
 ```text
-config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrade, mura, GUI)
+config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrade, mura, GUI, humanize)
 src/cocbot/
-  __main__.py                CLI: probe | capture | input-test | config-check | adb-check
+  __main__.py                CLI: probe | capture | input-test | gui | bench | config-check | adb-check
+  app/controller.py          ciclo start/stop, cattura, pause, tap a vuoto umanizzati
   core/                      tipi e contratti (ScreenSource, InputSink, Device)
   config/                    modelli pydantic + loader
+  safety/humanize.py         humanization/anti-ban: ritmi, pause, rate limit, avvisi
+  vision/safe_tap.py         euristiche: erba sicura per tap a vuoto + "sembra home"
+  gui/                       GUI minimale tkinter + hotkey globali
   capture/
     win32.py                 wrapper ctypes (DPI, finestre, input SendInput e messaggi Win32)
     window.py                scoperta finestra gioco + coordinate canoniche
@@ -81,7 +96,8 @@ src/cocbot/
     input_sendinput.py       input con focus forzato (solo test supervisionati)
     adb.py                   backend ADB (Developer Emulator / emulatori Android)
 docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
-tests/                       unit test (config, coordinate, WGC crop, winmsg)
+docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
+tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey, vision)
 tools/                       POC (poc_wgc.py, poc_bg_input.py); in arrivo record_session, calibrate
 ```
 

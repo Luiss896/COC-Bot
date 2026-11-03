@@ -113,6 +113,8 @@ class GuiConfig(BaseModel):
     debug_overlay: bool = True
     # hotkey globale start/stop: Ctrl+Alt+L (Ctrl+L "nudo" ruberebbe la scorciatoia ai browser)
     hotkey_start_stop: str = "ctrl+alt+l"
+    # kill switch: Ctrl+Alt+K (F12 risulta occupato da un'altra app su questo PC)
+    hotkey_kill: str = "ctrl+alt+k"
 
 
 class LootThresholds(BaseModel):
@@ -179,6 +181,32 @@ class WallsConfig(BaseModel):
     auto_stop_when_walls_max: bool = True
 
 
+class HumanizeConfig(BaseModel):
+    """Humanization/anti-ban: ritmi variabili, pause, tap a vuoto sicuri.
+
+    Nota: riduce solo alcuni segnali comportamentali, NON garantisce l'immunità dal ban.
+    """
+
+    enabled: bool = True
+    action_delay_ms: tuple[int, int] = (350, 1200)
+    min_seconds_between_actions: float = Field(default=0.25, ge=0, le=10)
+    break_probability: float = Field(default=0.02, ge=0, le=0.5)
+    break_duration_s: tuple[int, int] = (8, 45)
+    long_break_every_min: int = Field(default=25, ge=5, le=240)
+    long_break_duration_s: tuple[int, int] = (60, 180)
+    idle_tap_probability: float = Field(default=0.05, ge=0, le=0.3)
+    max_actions_per_minute: int = Field(default=30, ge=1, le=120)
+    max_same_target_repeats: int = Field(default=8, ge=2, le=50)
+
+    @field_validator("action_delay_ms", "break_duration_s", "long_break_duration_s")
+    @classmethod
+    def _range_order(cls, value: tuple[int, int]) -> tuple[int, int]:
+        lo, hi = value
+        if lo < 0 or hi < lo:
+            raise ValueError("intervallo deve essere (min, max) con 0 <= min <= max")
+        return value
+
+
 class Config(BaseModel):
     schema_version: int = 1
     profile_name: str = "default"
@@ -193,7 +221,7 @@ class Config(BaseModel):
     upgrade: UpgradeConfig = Field(default_factory=UpgradeConfig)
     walls: WallsConfig = Field(default_factory=WallsConfig)
     scheduler: dict[str, Any] = Field(default_factory=dict)
-    humanize: dict[str, Any] = Field(default_factory=dict)
+    humanize: HumanizeConfig = Field(default_factory=HumanizeConfig)
     telemetry: dict[str, Any] = Field(default_factory=dict)
     gui: GuiConfig = Field(default_factory=GuiConfig)
 
@@ -205,6 +233,7 @@ __all__ = [
     "DeviceConfig",
     "EarlyExitConfig",
     "GuiConfig",
+    "HumanizeConfig",
     "InputConfig",
     "KillSwitchConfig",
     "LootConfig",

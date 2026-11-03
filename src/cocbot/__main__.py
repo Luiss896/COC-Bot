@@ -192,6 +192,58 @@ def cmd_input_test(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(args: argparse.Namespace) -> int:
+    from cocbot.gui.app import load_default_config, run_gui
+
+    config = load_default_config()
+    print(f"GUI: config caricata (profilo {config.profile_name})")
+    return run_gui(config, selftest_s=args.selftest, auto_start=args.autostart)
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """Misura l'impatto del bot: FPS cattura, CPU%, RAM, frame stale/neri (sola lettura)."""
+    from cocbot.capture import win32, window
+    from cocbot.capture.screen_wgc import WgcScreenSource
+
+    win32.set_dpi_awareness()
+    info = window.find_game_window()
+    if info is None:
+        print("ERRORE: gioco non in esecuzione. Avvialo manualmente da GPGPC.")
+        return 2
+    game_window = window.GameWindow(info)
+    if win32.is_minimized(game_window.hwnd):
+        print("ERRORE: finestra del gioco minimizzata (WGC non cattura finestre minimizzate).")
+        return 2
+    source = WgcScreenSource(game_window, target_fps=args.fps)
+    frames = stale = black = 0
+    mem_start = win32.process_memory_mb()
+    cpu_start = time.process_time()
+    wall_start = time.monotonic()
+    print(f"bench: {args.seconds:.0f}s a ~{args.fps} FPS su {game_window}")
+    try:
+        while time.monotonic() - wall_start < args.seconds:
+            frame = source.grab()
+            frames += 1
+            stale += int(frame.stale)
+            black += int(bool(frame.metadata.get("black")))
+            time.sleep(max(0.0, 1.0 / args.fps - 0.001))
+    except KeyboardInterrupt:
+        print("interrotto")
+    finally:
+        health = source.health()
+        source.close()
+    wall = max(1e-6, time.monotonic() - wall_start)
+    cpu = time.process_time() - cpu_start
+    mem_end = win32.process_memory_mb()
+    print("\n== RISULTATO BENCH (impatto del bot) ==")
+    print(f"durata: {wall:.1f}s | frame nel loop: {frames} | FPS loop: {frames / wall:.2f}")
+    print(f"FPS cattura: {health.fps} | frame stale: {stale} | frame neri: {black}")
+    print(f"CPU processo: {cpu:.2f}s su {wall:.1f}s = {100.0 * cpu / wall:.1f}% di un core")
+    print(f"RAM working set: {mem_start:.1f} MB -> {mem_end:.1f} MB (delta {mem_end - mem_start:+.1f} MB)")
+    print("Nota: la cattura WGC gira in un thread nativo; il carico del gioco non è incluso.")
+    return 0
+
+
 def cmd_config_check(args: argparse.Namespace) -> int:
     from cocbot.config import load_config
 
@@ -223,6 +275,11 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         f"switch_all_when_walls_max={config.walls.switch_to_all_builders_when_walls_max}"
     )
     print(f"  attack: strategy={config.attack.strategy}  preset={config.upgrade.preset}")
+    print(
+        f"  humanize: enabled={config.humanize.enabled}  delay_ms={config.humanize.action_delay_ms}  "
+        f"idle_tap_prob={config.humanize.idle_tap_probability}  "
+        f"max_actions/min={config.humanize.max_actions_per_minute}"
+    )
     return 0
 
 
@@ -290,6 +347,16 @@ def build_parser() -> argparse.ArgumentParser:
     input_test.add_argument("--y", type=int, default=540, help="coordinata canonica Y (0-1080)")
     input_test.add_argument("--execute", action="store_true", help="invia davvero il click (default: dry-run)")
     input_test.set_defaults(func=cmd_input_test)
+
+    gui = sub.add_parser("gui", help="GUI minimale: Start/Stop, hotkey globale Ctrl+Alt+L, stato e avvisi")
+    gui.add_argument("--selftest", type=float, default=None, help="apre la GUI e la chiude dopo N secondi")
+    gui.add_argument("--autostart", action="store_true", help="avvia il bot all'apertura della GUI")
+    gui.set_defaults(func=cmd_gui)
+
+    bench = sub.add_parser("bench", help="misura impatto del bot (FPS cattura, CPU, RAM) in sola lettura")
+    bench.add_argument("--seconds", type=float, default=20.0)
+    bench.add_argument("--fps", type=int, default=5)
+    bench.set_defaults(func=cmd_bench)
 
     config_check = sub.add_parser("config-check", help="valida la configurazione YAML")
     config_check.add_argument("--path", default="config/config.example.yaml")

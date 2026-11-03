@@ -27,6 +27,11 @@ def test_defaults_are_safe() -> None:
     assert config.walls.switch_to_all_builders_when_walls_max is True
     assert config.walls.auto_stop_when_walls_max is True
     assert config.gui.hotkey_start_stop == "ctrl+alt+l"
+    # humanization/anti-ban attiva di default (richiesta utente)
+    assert config.humanize.enabled is True
+    assert config.humanize.max_actions_per_minute == 30
+    assert config.humanize.idle_tap_probability > 0
+    assert config.humanize.break_probability > 0
 
 
 def test_never_spend_gems_cannot_be_disabled() -> None:

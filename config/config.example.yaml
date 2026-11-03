@@ -127,10 +127,19 @@ scheduler:
   max_cycles_per_session: 6
 
 humanize:
+  # Anti-ban/humanization: rende i ritmi meno regolari. NON garantisce l'immunita' dal ban.
+  enabled: true
   timing_jitter: true
   random_idle_breaks: true
-  break_probability: 0.03
-  break_duration_s: [5, 20]
+  action_delay_ms: [350, 1200]        # ritardo tra azioni (distribuzione sbilanciata verso il basso)
+  min_seconds_between_actions: 0.25
+  break_probability: 0.02             # pausa breve casuale per azione
+  break_duration_s: [8, 45]
+  long_break_every_min: 25            # pausa lunga periodica (minuti)
+  long_break_duration_s: [60, 180]
+  idle_tap_probability: 0.05          # tap occasionali su erba vuota (mai su gemme/shop)
+  max_actions_per_minute: 30          # rate limit di sicurezza
+  max_same_target_repeats: 8          # allarme se lo stesso punto viene ripetuto troppe volte
 
 telemetry:
   log_level: "INFO"
@@ -144,3 +153,5 @@ gui:
   debug_overlay: true
   # hotkey globale start/stop del bot (Ctrl+Alt+L; Ctrl+L da solo ruberebbe i browser)
   hotkey_start_stop: "ctrl+alt+l"
+  # kill switch globale: ferma subito il bot (F12 è occupato su questo PC)
+  hotkey_kill: "ctrl+alt+k"

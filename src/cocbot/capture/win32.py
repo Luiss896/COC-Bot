@@ -347,3 +347,42 @@ def post_key(hwnd: int, vk: int) -> bool:
     time.sleep(0.03)
     ok_up = bool(user32.PostMessageW(HWND(hwnd), WM_KEYUP, vk, 0))
     return ok_down and ok_up
+
+
+def is_minimized(hwnd: int) -> bool:
+    """True se la finestra è minimizzata (WGC non cattura finestre minimizzate)."""
+    return bool(user32.IsIconic(HWND(hwnd)))
+
+
+class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        ("cb", DWORD),
+        ("PageFaultCount", DWORD),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+_psapi = ctypes.WinDLL("psapi", use_last_error=True)
+_psapi.GetProcessMemoryInfo.argtypes = [
+    wt.HANDLE,
+    ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+    DWORD,
+]
+_psapi.GetProcessMemoryInfo.restype = BOOL
+kernel32.GetCurrentProcess.restype = wt.HANDLE
+
+
+def process_memory_mb() -> float:
+    """Working set del processo corrente in MB (per misurare l'impatto del bot)."""
+    counters = PROCESS_MEMORY_COUNTERS()
+    counters.cb = ctypes.sizeof(counters)
+    if not _psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        return 0.0
+    return counters.WorkingSetSize / (1024.0 * 1024.0)

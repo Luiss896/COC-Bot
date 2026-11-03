@@ -71,6 +71,9 @@ class WgcScreenSource:
     ) -> None:
         self.window = window
         self.target_fps = max(1, target_fps)
+        # Throttle lato WGC: senza questo il sistema consegna ~50 frame/s (CPU alta anche
+        # quando il bot ne usa 5-10). minimum_update_interval è in millisecondi.
+        self._min_update_interval_ms = max(16, int(1000 / self.target_fps))
         self.black_luma_threshold = black_luma_threshold
         self.grab_timeout_s = grab_timeout_s
 
@@ -98,6 +101,7 @@ class WgcScreenSource:
             cursor_capture=False,
             draw_border=False,
             window_hwnd=self.window.hwnd,
+            minimum_update_interval=self._min_update_interval_ms,
         )
         self._capture = capture
 
@@ -110,7 +114,8 @@ class WgcScreenSource:
                 ox, oy, cw, ch = client_crop_box((frame_w, frame_h), client)
                 image = np.ascontiguousarray(image[oy : oy + ch, ox : ox + cw])
                 now = time.monotonic()
-                luma = float(image.mean())
+                # luma su un downsample: il mean() a piena risoluzione per frame costa CPU
+                luma = float(image[::6, ::6].mean())
                 with self._cond:
                     self._latest = image
                     self._latest_counter += 1
