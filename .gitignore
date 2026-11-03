@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# dati locali (privacy: screenshot contengono dati account)
+out/
+logs/
+data/
+recordings/
+probe-out/
+config/config.yaml
+
+# segreti
+.env
+*.key
+credentials*

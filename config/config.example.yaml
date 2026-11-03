@@ -1,0 +1,133 @@
+# ============================================================================
+#  cocbot - configurazione di sviluppo
+#  USO DIDATTICO. Automazione di Clash of Clans = violazione ToS Supercell.
+#  Regole non negoziabili: MAI gemme, MAI acquisti, MAI guerre/CWL.
+# ============================================================================
+schema_version: 1
+profile_name: "default"
+
+device:
+  # window = GPGPC consumer (default); adb = Google Play Games Developer Emulator
+  backend: "window"
+  window:
+    process_name: "crosvm.exe"
+    title_prefix: "Clash of Clans"      # non loggare il titolo completo (contiene l'account)
+    launcher_process: "client.exe"
+    launcher_title: "Google Play Games"
+    pause_on_human_activity: true
+    require_foreground_for_input: true
+  adb:
+    adb_path: ""                         # vuoto = cerca in PATH e nel Developer Emulator
+    serial: "localhost:6520"             # default del Developer Emulator
+    package: "com.supercell.clashofclans"
+    connect_timeout_s: 60
+
+ui:
+  profile: "ui-2026.10"
+  canonical_size: [1920, 1080]
+  locale: "en"                           # gioco in inglese (consigliato per OCR/template)
+  fail_on_fingerprint_mismatch: true
+
+capture:
+  backend: "wgc"                         # wgc | dxgi | mss | adb  (mss = fallback foreground)
+  target_fps: 10
+  black_frame_luma_threshold: 8.0
+  stale_frame_timeout_s: 2.0
+  save_dir: "out/captures"
+
+input:
+  backend: "sendinput"                   # sendinput | adb
+  jitter_ms: [60, 220]
+  restore_cursor: true
+
+safety:
+  never_spend_gems: true                 # vincolo obbligatorio (non disattivabile)
+  ban_iap_shop: true
+  gem_counter_stable_frames: 2
+  dry_run_default: true
+  mode: "dry_run"                        # dry_run | supervised | autonomous
+  max_session_hours: 2.0
+  max_attacks_per_hour: 20
+  max_upgrades_per_hour: 4
+  night_pause: { enabled: true, start: "23:30", end: "08:00" }
+  kill_switch:
+    hotkey: "F12"
+    esc_triple: true
+    corner_failsafe: { enabled: true, corner: "top_left", hold_ms: 700 }
+  panic_on:
+    - gem_delta_nonzero
+    - unknown_screen_streak
+    - forbidden_tap_attempt
+
+army:
+  recipe_name: "Dragon Spam"
+  expected_slots:
+    troops: ["dragon", "balloon"]
+    heroes: ["dragon_duke", "grand_warden"]
+    spells: ["rage", "freeze"]
+  max_army_cost: { gold: 0, elixir: 900000, dark: 0 }
+  verify_before_battle: true
+  min_reserve_for_army: { gold: 200000, elixir: 300000, dark: 5000 }
+
+attack:
+  strategy: "dragon_spam"
+  early_exit:
+    enabled: true
+    loot_target: { gold: 250000, elixir: 250000, dark: 1500 }
+    max_battle_duration_s: 90
+    exit_when_army_exhausted: true
+  max_battle_duration_s: 180
+  retry_on_error: 2
+
+loot:
+  thresholds:
+    gold_min: 350000
+    elixir_min: 350000
+    dark_min: 2000
+    score_min: 800000
+  weights: { gold: 1.0, elixir: 1.0, dark: 100.0 }
+  max_skip_per_attack: 40
+  skip_timeout_s: 120
+  max_th_delta: 1
+  skip_if_unreadable: true
+
+upgrade:
+  enabled: true
+  preset: "balanced_th18"
+  queue: []
+  reserves: { gold: 200000, elixir: 200000, dark: 3000 }
+  max_upgrades_per_cycle: 3
+  use_lab: true
+  use_heroes: true
+  ignore_categories: []
+  verify_after_upgrade: true
+
+walls:
+  mode: "check_only"                     # off | check_only | walls_first_excess | gate_before_th | strict_walls
+  check_before_upgrades: true
+  wall_upgrader_flow: true
+  max_wall_batches_per_cycle: 3
+  reserve_for_buildings: { gold: 100000, elixir: 100000 }
+
+scheduler:
+  farm_phase_minutes: 45
+  upgrade_phase_minutes: 10
+  idle_check_minutes: 10
+  max_cycles_per_session: 6
+
+humanize:
+  timing_jitter: true
+  random_idle_breaks: true
+  break_probability: 0.03
+  break_duration_s: [5, 20]
+
+telemetry:
+  log_level: "INFO"
+  log_dir: "logs"
+  sqlite_path: "data/cocbot.sqlite"
+  keep_screenshots_days: 7
+
+gui:
+  language: "it"
+  theme: "dark"
+  debug_overlay: true
