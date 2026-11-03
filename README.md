@@ -10,9 +10,10 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 
 | Tema | Decisione |
 |---|---|
-| **Backend primario** | **GPGPC consumer** (nessuna installazione extra, disco D: ha solo ~21 GB liberi): cattura **Windows Graphics Capture** + input `SendInput` con focus; fallback DXGI/schermo in foreground. |
-| **Backend secondario (opzionale)** | **Developer Emulator + ADB**: codice pronto, da attivare se l'utente installa il dev emulator (richiede ~20+ GB e sign-in). Consigliato per sessioni lunghe/background. **Mai** patch del consumer. |
-| **Lingua gioco** | **Inglese** (template/OCR più stabili); l'italiano resta supportato come secondo profilo. |
+| **Backend primario** | **GPGPC consumer** (nessuna installazione extra): cattura **Windows Graphics Capture** + input `SendInput` con focus; fallback DXGI/schermo in foreground. |
+| **Backend secondario (opzionale)** | **Developer Emulator + ADB**: codice pronto; ora installabile (D: ~94 GB liberi, aggiornato 3 nov) ma non installato. Consigliato se serve funzionamento in background/CI. **Mai** patch del consumer. |
+| **Lingua gioco** | **Inglese** (impostata dall'utente il 3 nov — da verificare al primo screenshot); l'italiano resta supportato come secondo profilo. |
+| **Account** | Si usa l'account **esistente** dell'utente (non dedicato): rischio ban dichiarato e accettato. |
 | **Priorità** | Bot funzionante prima; materiale d'esame dopo (non guida le scelte tecniche). |
 | **Sicurezza** | `dry_run` di default; GemGuard (mai gemme); kill switch; niente IAP; niente guerre/CWL. |
 
