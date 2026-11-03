@@ -57,6 +57,29 @@
   Nessun tap su altre aree; menu chiuso e ritorno in home verificati.
 - Scansione completa con stabilizzazione UI: **59 righe in 21 posizioni in 87,7 s**.
 
+### Aggiornamento 21:52 — upgrade "classico" (edificio) validato a runtime + fix livello di destinazione
+
+- Primo tentativo su `Air Bomb x3 [lv 3] · 37 500 oro`: il dialogo reale e' `Upgrade Air Bomb to
+  Level 3?` e l'engine **ha annullato senza spendere** (confronto `livello dialogo 3 != atteso 4`).
+- **Causa dimostrata:** il badge della riga del catalogo e' il **livello di destinazione**, non
+  quello attuale (3 coppie riga/dialogo verificate su frame reali: clan castle **8/8**, gold mine
+  **15/15**, Air Bomb **3/3**; per le mura invece il pannello mostra il livello attuale e il target
+  e' `selected_level + 1`). L'executor generico confrontava `row.level + 1`: off-by-one che
+  bloccava qualunque upgrade di edificio/eroe.
+- **Fix:** `_execute_upgrade` confronta `dialog.target_level` con `row.level`; test di regressione
+  `test_catalog_row_level_is_target_level` (dataset locale). `BuildRow.level` documentato come
+  livello di destinazione.
+- **Esecuzione reale verificata** (budget approvato dall'utente: 37 500 oro, tetto 50 000):
+  dialogo `Upgrade Air Bomb to Level 3?`, costo **37 500**, CONFIRM verde (mai l'Hammer of
+  Building) → oro **7 323 700 → 7 286 200** (−37 500 esatti), **builder 5/5 → 4/5**,
+  elisir 6 750 945 / dark 198 031 / **gemme 1 925 invariati**, menu chiuso e home verificata.
+- **Composizione del dialogo classico** (utile per i prossimi test): due pulsanti CONFIRM
+  (Hammer of Building a sinistra, grigio; costo a destra, verde) e prezzi/tempi "Gold Pass"
+  barrati. `find_confirm_button` seleziona solo il verde; `ui.find_hammer_button` esiste solo per
+  diagnostica e non va premuto; `read_dialog` legge il costo dal pulsante (i barrati vengono
+  scartati perche' l'OCR li legge preceduti da "-").
+- Scansione: **~56 righe in 21 posizioni in ~84 s** (due run live: 83,7 s e 83,8 s).
+
 ### Altri miglioramenti della stessa sessione
 
 - **Animazione dello scroll**: la lista Build si anima per **~1,8 s** dopo ogni evento
@@ -86,15 +109,17 @@
 - HUD in home: oro 7 089 459 · elisir 7 500 945 · dark 195 103 · gemme 1 925 · builder 5/5.
 - Scansione live completa: **62 righe uniche da 21 posizioni di scroll in 33,7 s**; piano dry-run
   con 3 upgrade scelti (BK, AQ, Minion Prince) e 21 righe scartate con motivo; risorse invariate.
-- Test: 105 unit test verdi (parser, geometria sintetica, dataset locale, planner/merge).
+- Test: 109 unit test verdi (parser, geometria sintetica, dataset locale, planner/merge, livello
+  di destinazione del catalogo).
 
 ## Limiti noti / da verificare
 
 - L'OCR windowed a volte non legge il tempo (`1d`) o sbaglia nomi (`30M Os`): mitigato con merge
   delle letture, allowlist e skip conservativo; in fullscreen la stessa riga era corretta.
-- **Esecuzione reale del dialogo upgrade standard** (edifici/eroi: riga → dialogo → CONFIRM): il
-  percorso è lo stesso del muro meno il pannello azioni, ma **non è ancora stato eseguito** su un
-  edificio reale. Il muro invece è validato (sopra).
+- **Esecuzione reale del dialogo upgrade standard** (edifici/eroi: riga → dialogo → CONFIRM):
+  **validata a runtime su un edificio** (Air Bomb, 37 500 oro, vedi sopra). Per gli **eroi** lo
+  stesso ramo logico è pronto ma la prima esecuzione reale resta da fare; restano da validare
+  anche le righe con sottotitolo/descrizione (Crafting Station) e il lettore fullscreen live.
 - **Input via `PostMessage`**: le intermittenze osservate a metà sessione erano dovute a un
   **reload del gioco fatto dall'utente mentre i test giravano** (confermato dall'utente); dopo
   il chiarimento i tap/scroll sintetici hanno funzionato per tutte le scansioni ed esecuzioni

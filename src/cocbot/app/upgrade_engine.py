@@ -1059,7 +1059,11 @@ class UpgradeEngine:
             self.recover_home()
             raise UpgradeEngineError("dialogo di conferma non aperto: esecuzione annullata")
         dialog = build_menu.read_dialog(dialog_image)
-        expected_level = None if row.level is None else row.level + 1
+        # la riga del catalogo mostra il livello di DESTINAZIONE: il dialogo conferma
+        # "Upgrade <X> to Level <row.level>?" (verificato su frame reali: clan castle 8/8,
+        # gold mine 15/15, air bomb 3/3). Per le mura vale l'opposto: il pannello mostra il
+        # livello ATTUALE e il target e' selected_level+1 (vedi _execute_wall_upgrade).
+        expected_level = row.level
         problems: list[str] = []
         if dialog.name is None or _normalize_name(dialog.name) not in _normalize_name(row.name):
             problems.append(f"nome dialogo {dialog.name!r} diverso da {row.name!r}")

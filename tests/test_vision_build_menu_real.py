@@ -103,6 +103,26 @@ def test_read_dialog_upgrade_confirm() -> None:
     assert 0.85 * 1733 < dialog.close_point[0] < 0.92 * 1733
 
 
+def test_catalog_row_level_is_target_level() -> None:
+    """La riga del catalogo mostra il livello di DESTINAZIONE, non quello attuale.
+
+    Il dialogo di conferma dice "Upgrade <X> to Level <level>?" con lo stesso numero della
+    riga (verificato su frame reali: clan castle 8/8, gold mine 15/15). L'executor deve
+    quindi confrontare ``dialog.target_level`` con ``row.level``, non con ``row.level + 1``.
+    """
+    from cocbot.vision import build_menu
+
+    castle = _rows_by_name(_load("build-menu-top.png"))["clan castle"]
+    castle_dialog = build_menu.read_dialog(_load("upgrade-info-clan-castle.png"))
+    assert castle.level == castle_dialog.target_level == 8
+    assert castle.cost == castle_dialog.cost
+
+    mine = _rows_by_name(_load("build-menu-mid.png"))["gold mine"]
+    mine_dialog = build_menu.read_dialog(_load("upgrade-info-gold-mine.png"))
+    assert mine.level == mine_dialog.target_level == 15
+    assert mine.cost == mine_dialog.cost
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 

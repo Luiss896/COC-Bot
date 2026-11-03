@@ -47,6 +47,9 @@ class BuildRow:
     raw_name: str
     name: str  # nome normalizzato senza quantita'
     count: int
+    # Il catalogo "Buildings & Heroes" mostra il livello di DESTINAZIONE (quello che la riga
+    # propone), non il livello attuale: il dialogo dice "Upgrade <X> to Level <level>?"
+    # (verificato su frame reali: clan castle 8/8, gold mine 15/15, air bomb 3/3).
     level: int | None
     time_s: int | None
     cost: int | None
