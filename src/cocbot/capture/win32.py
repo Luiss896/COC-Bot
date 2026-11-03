@@ -5,13 +5,12 @@ Nessuna dipendenza esterna: funziona con la sola stdlib. Tutte le coordinate son
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import os
 import time
 from ctypes import wintypes as wt
 from dataclasses import dataclass
-
-from contextlib import suppress
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
