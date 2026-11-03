@@ -36,7 +36,9 @@ capture:
   save_dir: "out/captures"
 
 input:
-  backend: "sendinput"                   # sendinput | adb
+  # winmsg = messaggi Win32 alla finestra: il bot NON ruba focus ne' muove il cursore.
+  # sendinput = click "reali" con focus forzato (interferisce: solo per test supervisionati).
+  backend: "winmsg"
   jitter_ms: [60, 220]
   restore_cursor: true
 
@@ -46,9 +48,12 @@ safety:
   gem_counter_stable_frames: 2
   dry_run_default: true
   mode: "dry_run"                        # dry_run | supervised | autonomous
-  max_session_hours: 2.0
-  max_attacks_per_hour: 20
-  max_upgrades_per_hour: 4
+  # Limiti: null = illimitato (default). Si impostano a mano dalla GUI del bot.
+  max_session_hours: null
+  max_attacks_per_hour: null
+  max_upgrades_per_hour: null
+  # Auto-stop: mura tutte max + tutti i builder occupati + depositi pieni -> nulla da fare -> stop
+  auto_stop_when_nothing_to_do: true
   night_pause: { enabled: true, start: "23:30", end: "08:00" }
   kill_switch:
     hotkey: "F12"
@@ -108,6 +113,12 @@ walls:
   wall_upgrader_flow: true
   max_wall_batches_per_cycle: 3
   reserve_for_buildings: { gold: 100000, elixir: 100000 }
+  # Preset A: un builder resta libero e riservato alle mura (upgrade mura istantaneo);
+  # gli altri builder lavorano. Preset B (automatico): quando tutte le mura sono al massimo
+  # tutti i builder possono lavorare.
+  reserve_builder_for_walls: true
+  switch_to_all_builders_when_walls_max: true
+  auto_stop_when_walls_max: true
 
 scheduler:
   farm_phase_minutes: 45
@@ -131,3 +142,5 @@ gui:
   language: "it"
   theme: "dark"
   debug_overlay: true
+  # hotkey globale start/stop del bot (Ctrl+Alt+L; Ctrl+L da solo ruberebbe i browser)
+  hotkey_start_stop: "ctrl+alt+l"

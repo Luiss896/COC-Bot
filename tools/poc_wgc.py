@@ -91,7 +91,7 @@ def run_capture(hwnd: int, seconds: float, out_dir: Path, save_every_s: float) -
             stats["frames"] += 1
             if now >= next_save:
                 path = out_dir / f"wgc-{stats['frames']:04d}.png"
-                frame.to_bgr().save_as_image(str(path))
+                frame.convert_to_bgr().save_as_image(str(path))
                 stats["saved"].append(str(path))
                 next_save = now + save_every_s
             if now - start >= seconds:

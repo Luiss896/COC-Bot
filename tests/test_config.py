@@ -16,6 +16,17 @@ def test_defaults_are_safe() -> None:
     assert config.safety.mode is RunMode.DRY_RUN
     assert config.ui.locale == "en"
     assert config.walls.mode is WallMode.CHECK_ONLY
+    # decisioni utente del 3 nov: nessun limite di default (illimitato se non impostato),
+    # input non invasivo, preset builder riservato alle mura + switch automatico
+    assert config.safety.max_session_hours is None
+    assert config.safety.max_attacks_per_hour is None
+    assert config.safety.max_upgrades_per_hour is None
+    assert config.safety.auto_stop_when_nothing_to_do is True
+    assert config.input.backend == "winmsg"
+    assert config.walls.reserve_builder_for_walls is True
+    assert config.walls.switch_to_all_builders_when_walls_max is True
+    assert config.walls.auto_stop_when_walls_max is True
+    assert config.gui.hotkey_start_stop == "ctrl+alt+l"
 
 
 def test_never_spend_gems_cannot_be_disabled() -> None:
@@ -36,6 +47,10 @@ def test_example_config_is_valid() -> None:
     assert config.safety.never_spend_gems is True
     assert config.device.backend in {"window", "adb"}
     assert config.attack.strategy == "dragon_spam"
+    assert config.capture.backend == "wgc"
+    assert config.input.backend == "winmsg"
+    assert config.safety.max_session_hours is None  # illimitato di default
+    assert config.gui.hotkey_start_stop == "ctrl+alt+l"
 
 
 def test_safety_rejects_negative_limits() -> None:

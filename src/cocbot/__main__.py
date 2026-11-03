@@ -83,7 +83,6 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 def cmd_capture(args: argparse.Namespace) -> int:
     from cocbot.capture import win32, window
-    from cocbot.capture.screen_mss import MssScreenSource, save_frame_png
 
     win32.set_dpi_awareness()
     info = window.find_game_window()
@@ -96,31 +95,46 @@ def cmd_capture(args: argparse.Namespace) -> int:
         return 2
 
     game_window = window.GameWindow(info)
-    if not game_window.is_foreground and not args.include_launcher:
-        print(
-            "ATTENZIONE: la finestra del gioco non è in primo piano. "
-            "La cattura 'mss' richiede che sia visibile/non coperta: portala in foreground."
-        )
-
     previous_foreground: int | None = None
-    if args.focus:
-        previous_foreground = win32.foreground_window()
-        if game_window.focus():
-            print("Finestra portata in primo piano per la cattura.")
-        else:
-            print("ATTENZIONE: focus non riuscito (la cattura potrebbe essere coperta).")
-        time.sleep(0.4)
 
-    source = MssScreenSource(game_window, target_fps=args.fps)
+    if args.backend == "wgc":
+        from cocbot.capture.screen_wgc import WgcScreenSource, save_frame_png
+
+        if game_window.is_foreground:
+            print("Finestra in primo piano (non serve: WGC cattura anche se coperta).")
+        else:
+            print("Finestra non in primo piano: cattura WGC 'coperta' (serve solo non minimizzata).")
+        source = WgcScreenSource(game_window, target_fps=args.fps)
+    else:
+        from cocbot.capture.screen_mss import MssScreenSource, save_frame_png
+
+        if not game_window.is_foreground and not args.include_launcher:
+            print(
+                "ATTENZIONE: la finestra del gioco non è in primo piano. "
+                "La cattura 'mss' richiede che sia visibile/non coperta: portala in foreground."
+            )
+        if args.focus:
+            previous_foreground = win32.foreground_window()
+            if game_window.focus():
+                print("Finestra portata in primo piano per la cattura.")
+            else:
+                print("ATTENZIONE: focus non riuscito (la cattura potrebbe essere coperta).")
+            time.sleep(0.4)
+        source = MssScreenSource(game_window, target_fps=args.fps)
+
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     saved = 0
     frame_index = 0
-    print(f"Cattura da {game_window} per {args.seconds:.1f}s a ~{args.fps} FPS -> {out_dir}")
+    print(f"Cattura {args.backend.upper()} da {game_window} per {args.seconds:.1f}s -> {out_dir}")
     try:
         while time.monotonic() - started < args.seconds:
-            frame = source.grab()
+            try:
+                frame = source.grab()
+            except RuntimeError as exc:
+                print(f"ERRORE cattura: {exc}")
+                break
             if frame_index % args.save_every == 0 and saved < args.max_frames:
                 path = out_dir / f"frame-{saved:04d}.png"
                 save_frame_png(frame, path)
@@ -137,11 +151,44 @@ def cmd_capture(args: argparse.Namespace) -> int:
 
     print(
         f"\nFrame acquisiti: {health.frames}  |  FPS: {health.fps}  |  "
-        f"frame neri: {health.black_frames}  |  frame identici: {health.stale_frames}"
+        f"frame neri: {health.black_frames}  |  frame stale: {health.stale_frames}"
     )
     print(f"PNG salvati: {saved} in {out_dir.resolve()}")
     if health.black_frames > 0:
         print("ATTENZIONE: frame neri rilevati (finestra minimizzata/coperta o problema di cattura).")
+    if health.last_error:
+        print(f"Ultimo errore cattura: {health.last_error}")
+    return 0
+
+
+def cmd_input_test(args: argparse.Namespace) -> int:
+    from cocbot.capture import win32, window
+    from cocbot.capture.input_winmsg import WinMsgSink
+    from cocbot.core.types import GamePoint
+
+    win32.set_dpi_awareness()
+    info = window.find_game_window()
+    if info is None:
+        print("ERRORE: gioco non in esecuzione. Avvialo manualmente da GPGPC.")
+        return 2
+    game_window = window.GameWindow(info)
+    sink = WinMsgSink(game_window, jitter_ms=(0, 0))
+    point = GamePoint(args.x, args.y)
+    client = window.canonical_to_client((point.x, point.y), game_window.client_width, game_window.client_height)
+    fg_before = win32.foreground_window()
+    cursor_before = win32.cursor_pos()
+    print(f"finestra: {game_window}")
+    print(f"tap canonico {point} -> client {client} (backend winmsg, nessun focus)")
+    print(f"foreground prima: 0x{fg_before:X}  |  cursore prima: {cursor_before}")
+    if not args.execute:
+        print("dry-run: nessun click inviato (usa --execute per inviarlo).")
+        return 0
+    sink.tap_canonical(point)
+    time.sleep(0.8)
+    fg_after = win32.foreground_window()
+    cursor_after = win32.cursor_pos()
+    print(f"foreground dopo: 0x{fg_after:X}  |  cursore dopo: {cursor_after}")
+    print(f"interferenza: focus cambiato={fg_before != fg_after}  cursore mosso={cursor_before != cursor_after}")
     return 0
 
 
@@ -159,9 +206,22 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         return 1
     print(f"Config valida: {path}")
     print(f"  profile: {config.profile_name}  |  device: {config.device.backend}  |  capture: {config.capture.backend}")
+    print(f"  input: {config.input.backend}  |  gui hotkey start/stop: {config.gui.hotkey_start_stop}")
     print(f"  ui: {config.ui.profile}  |  locale: {config.ui.locale}  |  canonical: {config.ui.canonical_size}")
     print(f"  safety: mode={config.safety.mode.value}  never_spend_gems={config.safety.never_spend_gems}")
-    print(f"  walls: mode={config.walls.mode.value}  check_before_upgrades={config.walls.check_before_upgrades}")
+    print(
+        f"  limiti: sessione={config.safety.max_session_hours}h  "
+        f"attacchi/h={config.safety.max_attacks_per_hour}  "
+        f"upgrade/h={config.safety.max_upgrades_per_hour}  (None = illimitato)"
+    )
+    print(
+        f"  auto-stop: nothing_to_do={config.safety.auto_stop_when_nothing_to_do}  "
+        f"walls_max={config.walls.auto_stop_when_walls_max}"
+    )
+    print(
+        f"  walls: mode={config.walls.mode.value}  reserve_builder={config.walls.reserve_builder_for_walls}  "
+        f"switch_all_when_walls_max={config.walls.switch_to_all_builders_when_walls_max}"
+    )
     print(f"  attack: strategy={config.attack.strategy}  preset={config.upgrade.preset}")
     return 0
 
@@ -213,11 +273,23 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--save-every", type=int, default=1)
     capture.add_argument("--include-launcher", action="store_true", help="se il gioco è chiuso usa il client")
     capture.add_argument(
+        "--backend",
+        choices=["wgc", "mss"],
+        default="wgc",
+        help="wgc = cattura la finestra anche se coperta (default); mss = solo schermo visibile",
+    )
+    capture.add_argument(
         "--focus",
         action="store_true",
-        help="porta la finestra in primo piano durante la cattura e ripristina dopo",
+        help="(solo mss) porta la finestra in primo piano durante la cattura e ripristina dopo",
     )
     capture.set_defaults(func=cmd_capture)
+
+    input_test = sub.add_parser("input-test", help="testa un tap non invasivo (messaggi Win32, nessun focus)")
+    input_test.add_argument("--x", type=int, default=960, help="coordinata canonica X (0-1920)")
+    input_test.add_argument("--y", type=int, default=540, help="coordinata canonica Y (0-1080)")
+    input_test.add_argument("--execute", action="store_true", help="invia davvero il click (default: dry-run)")
+    input_test.set_defaults(func=cmd_input_test)
 
     config_check = sub.add_parser("config-check", help="valida la configurazione YAML")
     config_check.add_argument("--path", default="config/config.example.yaml")

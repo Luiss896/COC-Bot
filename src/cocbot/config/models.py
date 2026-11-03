@@ -41,9 +41,14 @@ class SafetyConfig(BaseModel):
     gem_counter_stable_frames: int = Field(default=2, ge=2, le=5)
     dry_run_default: bool = True
     mode: RunMode = RunMode.DRY_RUN
-    max_session_hours: float = Field(default=2.0, gt=0, le=12)
-    max_attacks_per_hour: int = Field(default=20, ge=1, le=120)
-    max_upgrades_per_hour: int = Field(default=4, ge=1, le=30)
+    # Limiti di sicurezza: None = illimitato (default deciso dall'utente: nessun limite
+    # se non impostato a mano dalla GUI del bot). Se impostati devono essere positivi.
+    max_session_hours: float | None = Field(default=None, gt=0, le=24)
+    max_attacks_per_hour: int | None = Field(default=None, ge=1, le=120)
+    max_upgrades_per_hour: int | None = Field(default=None, ge=1, le=30)
+    # Auto-stop: quando non c'e' piu' nulla da fare (mura max + builder tutti occupati +
+    # depositi pieni) il bot si ferma da solo.
+    auto_stop_when_nothing_to_do: bool = True
     night_pause: dict[str, Any] = Field(default_factory=dict)
     kill_switch: KillSwitchConfig = Field(default_factory=KillSwitchConfig)
     panic_on: list[str] = Field(default_factory=list)
@@ -86,7 +91,8 @@ class CaptureConfig(BaseModel):
 
 
 class InputConfig(BaseModel):
-    backend: Literal["sendinput", "adb"] = "sendinput"
+    # winmsg = messaggi Win32 alla finestra: nessun focus, nessun cursore (default, zero interferenza)
+    backend: Literal["winmsg", "sendinput", "adb"] = "winmsg"
     jitter_ms: tuple[int, int] = (60, 220)
     restore_cursor: bool = True
 
@@ -97,6 +103,16 @@ class InputConfig(BaseModel):
         if lo < 0 or hi < lo:
             raise ValueError("jitter_ms deve essere (min, max) con 0 <= min <= max")
         return value
+
+
+class GuiConfig(BaseModel):
+    """Preferenze dell'interfaccia (GUI minimale: start/stop + hotkey globale)."""
+
+    language: str = "it"
+    theme: str = "dark"
+    debug_overlay: bool = True
+    # hotkey globale start/stop: Ctrl+Alt+L (Ctrl+L "nudo" ruberebbe la scorciatoia ai browser)
+    hotkey_start_stop: str = "ctrl+alt+l"
 
 
 class LootThresholds(BaseModel):
@@ -153,6 +169,14 @@ class WallsConfig(BaseModel):
     reserve_for_buildings: dict[str, int] = Field(
         default_factory=lambda: {"gold": 100_000, "elixir": 100_000}
     )
+    # Preset A (default): un builder resta sempre libero, riservato alle mura (le mura
+    # richiedono un builder libero ma l'upgrade e' istantaneo). Gli altri builder lavorano.
+    reserve_builder_for_walls: bool = True
+    # Passaggio automatico preset A -> B: quando tutte le mura sono al massimo non serve
+    # piu' tenere un builder libero, quindi tutti i builder possono lavorare.
+    switch_to_all_builders_when_walls_max: bool = True
+    # Auto-stop coerente: non fermarsi mai mentre le mura non sono al massimo.
+    auto_stop_when_walls_max: bool = True
 
 
 class Config(BaseModel):
@@ -171,7 +195,7 @@ class Config(BaseModel):
     scheduler: dict[str, Any] = Field(default_factory=dict)
     humanize: dict[str, Any] = Field(default_factory=dict)
     telemetry: dict[str, Any] = Field(default_factory=dict)
-    gui: dict[str, Any] = Field(default_factory=dict)
+    gui: GuiConfig = Field(default_factory=GuiConfig)
 
 
 __all__ = [
@@ -180,6 +204,7 @@ __all__ = [
     "Config",
     "DeviceConfig",
     "EarlyExitConfig",
+    "GuiConfig",
     "InputConfig",
     "KillSwitchConfig",
     "LootConfig",

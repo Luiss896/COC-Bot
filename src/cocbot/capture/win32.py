@@ -236,6 +236,11 @@ def is_foreground(hwnd: int) -> bool:
     return foreground_window() == hwnd
 
 
+def is_window(hwnd: int) -> bool:
+    """True se l'HWND identifica ancora una finestra esistente."""
+    return bool(user32.IsWindow(HWND(hwnd)))
+
+
 def focus_window(hwnd: int, restore_sleep_s: float = 0.15) -> bool:
     """Riporta la finestra in primo piano (ripristinandola se minimizzata).
 
@@ -300,3 +305,45 @@ def key_tap(vk: int) -> None:
     user32.keybd_event(vk, 0, 0, 0)
     time.sleep(0.03)
     user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+
+
+# ---------------------------------------------------------------------------
+# Input NON invasivo: messaggi Win32 alla finestra (nessun focus, nessun cursore).
+# Verificato su GPGPC consumer: la finestra crosvm del gioco accetta i messaggi anche
+# se non e' in foreground. Usato dal backend ``winmsg``.
+# ---------------------------------------------------------------------------
+WM_MOUSEMOVE = 0x0200
+WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+MK_LBUTTON = 0x0001
+
+
+def _make_lparam(x: int, y: int) -> int:
+    """Impacchetta le coordinate client in un LPARAM (low word x, high word y)."""
+    return ((y & 0xFFFF) << 16) | (x & 0xFFFF)
+
+
+def post_mouse_click(hwnd: int, client_x: int, client_y: int, hold_ms: int = 40) -> bool:
+    """Click sinistro alla finestra via ``PostMessage`` (senza focus e senza muovere il cursore).
+
+    Le coordinate sono relative all'area client della finestra. Ritorna False se il
+    messaggio non e' stato accodato (finestra chiusa/non valida).
+    """
+    lp = _make_lparam(client_x, client_y)
+    ok_move = bool(user32.PostMessageW(HWND(hwnd), WM_MOUSEMOVE, 0, lp))
+    time.sleep(0.02)
+    ok_down = bool(user32.PostMessageW(HWND(hwnd), WM_LBUTTONDOWN, MK_LBUTTON, lp))
+    time.sleep(hold_ms / 1000.0)
+    ok_up = bool(user32.PostMessageW(HWND(hwnd), WM_LBUTTONUP, 0, lp))
+    time.sleep(0.02)
+    return ok_move and ok_down and ok_up
+
+
+def post_key(hwnd: int, vk: int) -> bool:
+    """Invia un tasto alla finestra via ``PostMessage`` (non tutte le app lo accettano)."""
+    ok_down = bool(user32.PostMessageW(HWND(hwnd), WM_KEYDOWN, vk, 0))
+    time.sleep(0.03)
+    ok_up = bool(user32.PostMessageW(HWND(hwnd), WM_KEYUP, vk, 0))
+    return ok_down and ok_up
