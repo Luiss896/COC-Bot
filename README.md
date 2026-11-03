@@ -24,6 +24,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
 | **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
 | **Builder/mura** | Preset **A**: 1 builder libero riservato alle mura (upgrade istantaneo); passaggio automatico a **B** quando tutte le mura sono max (tutti i builder lavorano). Config `walls.*`. |
+| **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: è il catalogo nativo del gioco (nome, livello, costo, valuta, tempo, affordability), **eroi inclusi**. L'engine legge la lista, filtra per risorse−riserve, builder liberi e priorità, e conferma solo "Upgrade" (mai "Finish Now"/gemme). Hero Hall resta **opzionale** (dettagli/equipaggiamento). Nessun livello/costo hardcoded. |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
 
 ## Stato
