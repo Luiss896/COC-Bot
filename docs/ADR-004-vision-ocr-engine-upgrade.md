@@ -183,3 +183,17 @@
 - Config: `upgrade.priority` (default mura→difese→offensiva→eroi→risorse), `upgrade.include_walls`
   (default true), `upgrade.dry_run`, `upgrade.max_scan_scrolls`, `attack.use_heroes`,
   `attack.heroes_require_ready`.
+
+### Aggiornamento 4 nov 11:47 — planner `--only` end-to-end con `--execute` VALIDATO live
+
+- **`upgrade-run --execute --only "<nome>"`** completa il ciclo reale planner→navigazione→dialogo→
+  CONFIRM→verifica su una riga scelta: non più solo validazioni con script fuori dal planner.
+- Live: `--execute --only "Gold Mine"` → riga `Gold Mine x 7 [lv 15]` (costo 600 000 elisir) →
+  upgrade **confermato e verificato**; HUD **elisir 10 000 000 → 9 400 000 (−600 000)**, builder
+  **4/5 → 3/5**, oro 10 000 000 invariato, dark 174 657 e gemme 1 925 invariati; report in
+  `out/upgrade/run-20261104-114721.json`.
+- Scelta del target: risorse **già al cap** (oro/elisir 10 000 000) → l'upgrade usa risorse che
+  sarebbero comunque state sprecate; spesa piccola e tracciata (600 000 elisir).
+- **GUI tkinter**: aggiunto pannello **Attacco** (dry-run raid/scout loot/raid reale con opzioni
+  ricerche max, spell, eroi, cap storage) che esegue le CLI `attack-*` in un thread e ne riversa
+  l'output nel log; pulsanti disabilitati durante l'esecuzione o col bot attivo. Selftest GUI ok.

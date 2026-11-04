@@ -1,13 +1,18 @@
-"""GUI minimale (tkinter, stdlib): stato, Start/Stop e hotkey globali.
+"""GUI minimale (tkinter, stdlib): stato, Start/Stop, hotkey globali e loop attacco.
 
 - non ruba il focus: nessuna chiamata a focus_force/lift;
 - hotkey globale start/stop configurabile (`gui.hotkey_start_stop`, default Ctrl+Alt+L);
 - kill switch globale `F12`;
-- mostra stato, FPS, sessione, azioni, pause e avvisi anti-ban.
+- mostra stato, FPS, sessione, azioni, pause e avvisi anti-ban;
+- pannello **Attacco**: dry-run raid, scout loot e raid reale (questi ultimi spendono ~1100
+  oro/ricerca) lanciati come CLI `python -m cocbot attack-*` in un thread, con output nel log.
 """
 from __future__ import annotations
 
 import queue
+import subprocess
+import sys
+import threading
 import time
 import tkinter as tk
 from pathlib import Path
@@ -20,6 +25,9 @@ from cocbot.gui.hotkey import GlobalHotkey, parse_hotkey
 
 _HOTKEY_START_STOP = 1
 _HOTKEY_KILL = 2
+
+# radice del repo (src/cocbot/gui/app.py -> parents[3]) per lanciare `python -m cocbot`
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _STATE_LABELS = {
     BotState.IDLE: "pronto",
@@ -64,8 +72,8 @@ def run_gui(
 
     root = tk.Tk()
     root.title("cocbot — automazione Clash of Clans (uso didattico, viola i ToS)")
-    root.geometry("640x470")
-    root.minsize(560, 400)
+    root.geometry("660x580")
+    root.minsize(600, 520)
 
     main = ttk.Frame(root, padding=10)
     main.pack(fill="both", expand=True)
@@ -89,6 +97,35 @@ def run_gui(
     start_button = ttk.Button(buttons, text="Avvia bot")
     start_button.pack(side="left")
 
+    # --- pannello attacco (CLI in thread, output nel log) -------------------------
+    attack_frame = ttk.LabelFrame(main, text="Attacco (spende oro: ~1100 per ricerca)")
+    attack_frame.pack(fill="x", pady=(0, 6))
+    attack_options = ttk.Frame(attack_frame)
+    attack_options.pack(fill="x", pady=(2, 2))
+    searches_var = tk.IntVar(value=2)
+    spells_var = tk.IntVar(value=0)
+    heroes_var = tk.BooleanVar(value=config.attack.use_heroes)
+    caps_var = tk.BooleanVar(value=config.attack.respect_storage_caps)
+    ttk.Label(attack_options, text="ricerche max:").pack(side="left")
+    ttk.Spinbox(attack_options, from_=1, to=5, width=3, textvariable=searches_var).pack(
+        side="left", padx=(2, 8)
+    )
+    ttk.Label(attack_options, text="spell:").pack(side="left")
+    ttk.Spinbox(attack_options, from_=0, to=8, width=3, textvariable=spells_var).pack(
+        side="left", padx=(2, 8)
+    )
+    ttk.Checkbutton(attack_options, text="eroi", variable=heroes_var).pack(side="left", padx=(0, 8))
+    ttk.Checkbutton(attack_options, text="rispetta cap storage", variable=caps_var).pack(side="left")
+    attack_buttons_row = ttk.Frame(attack_frame)
+    attack_buttons_row.pack(fill="x", pady=(2, 2))
+    dry_button = ttk.Button(attack_buttons_row, text="Dry-run raid")
+    scout_button = ttk.Button(attack_buttons_row, text="Scout loot (spende)")
+    raid_button = ttk.Button(attack_buttons_row, text="Raid reale (spende)")
+    for button in (dry_button, scout_button, raid_button):
+        button.pack(side="left", padx=(0, 6))
+    attack_var = tk.StringVar(value="attacco: idle")
+    ttk.Label(attack_frame, textvariable=attack_var, foreground="#555").pack(anchor="w")
+
     log_box = scrolledtext.ScrolledText(main, height=14, state="disabled", wrap="word")
     log_box.pack(fill="both", expand=True)
 
@@ -98,9 +135,81 @@ def run_gui(
         log_box.see("end")
         log_box.configure(state="disabled")
 
+    attack_state: dict[str, bool] = {"running": False}
+    attack_buttons = (dry_button, scout_button, raid_button)
+
+    def sync_attack_buttons() -> None:
+        bot_running = controller.snapshot().state == BotState.RUNNING
+        enabled = not attack_state["running"] and not bot_running
+        for button in attack_buttons:
+            button.configure(state="normal" if enabled else "disabled")
+
+    def start_attack_cli(extra: list[str], label: str) -> None:
+        if attack_state["running"]:
+            append_log("attacco: comando già in esecuzione")
+            return
+        attack_state["running"] = True
+        sync_attack_buttons()
+        attack_var.set(f"attacco: {label} in corso…")
+        command = [sys.executable, "-m", "cocbot", *extra]
+        append_log(f"attacco: avvio {label}: {' '.join(command[2:])}")
+
+        def worker() -> None:
+            exit_code = -1
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(REPO_ROOT),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                assert process.stdout is not None
+                for line in process.stdout:
+                    log_queue.put(line.rstrip())
+                exit_code = process.wait()
+            except OSError as exc:
+                log_queue.put(f"attacco: errore avvio: {exc}")
+            finally:
+
+                def finish() -> None:
+                    attack_state["running"] = False
+                    attack_var.set(f"attacco: {label} terminato (exit {exit_code})")
+                    log_queue.put(f"attacco: {label} terminato (exit {exit_code})")
+                    sync_attack_buttons()
+
+                root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def raid_args() -> list[str]:
+        arguments = [
+            "attack-run",
+            "--allow-spend",
+            "--max-searches",
+            str(max(1, searches_var.get())),
+            "--spells",
+            str(max(0, spells_var.get())),
+        ]
+        if not heroes_var.get():
+            arguments.append("--no-heroes")
+        if not caps_var.get():
+            arguments.append("--ignore-caps")
+        return arguments
+
+    dry_button.configure(command=lambda: start_attack_cli(["attack-run"], "raid dry-run"))
+    scout_button.configure(
+        command=lambda: start_attack_cli(["attack-scout", "--allow-spend"], "scout loot")
+    )
+    raid_button.configure(command=lambda: start_attack_cli(raid_args(), "raid reale"))
+    sync_attack_buttons()
+
     def toggle_bot() -> None:
         running = controller.toggle()
         start_button.configure(text="Ferma bot" if running else "Avvia bot")
+        sync_attack_buttons()
 
     start_button.configure(command=toggle_bot)
 
