@@ -5,13 +5,14 @@ Il classificatore e' volutamente **conservativo**: se non riconosce lo stato res
 
 Stati riconosciuti oggi (verificati su frame reali):
 - ``HOME``: villaggio principale, nessun pannello/menu aperto;
+- ``BATTLE_MENU``: menu Battle (pannello sinistro con "Find a Match" arancione);
 - ``BUILD_MENU``: menu "Buildings & Heroes" (pannello a destra + X in alto a destra);
 - ``UPGRADE_CONFIRM``: dialogo "Upgrade <X> to Level <N>?" con X centrale;
 - ``PLACEMENT``: modalita' piazzamento nuovo edificio (X rossa + spunta al centro);
 - ``NETWORK_ERROR``: modal di disconnessione per inattivita' ("Anyone there?").
 
-Stati pianificati ma non ancora implementati (restano ``UNKNOWN``): battaglia, menu
-battaglia, popup, negozio, Hero Hall, wall upgrader.
+Stati pianificati ma non ancora implementati (restano ``UNKNOWN``): anteprima/battaglia,
+popup, negozio, Hero Hall, wall upgrader.
 """
 from __future__ import annotations
 
@@ -38,6 +39,8 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.PLACEMENT
     if _is_build_menu(image):
         return ScreenState.BUILD_MENU
+    if ui.find_find_match_button(image) is not None:
+        return ScreenState.BATTLE_MENU
     if looks_like_home(image) and not panel_likely_open(image):
         return ScreenState.HOME
     return ScreenState.UNKNOWN
@@ -53,6 +56,7 @@ def describe(state: ScreenState) -> str:
     """Descrizione italiana dello stato (per log/CLI)."""
     descriptions = {
         ScreenState.HOME: "home village",
+        ScreenState.BATTLE_MENU: "menu Battle (Multiplayer/Single/Practice)",
         ScreenState.BUILD_MENU: "menu Build (Buildings & Heroes)",
         ScreenState.UPGRADE_CONFIRM: "dialogo conferma upgrade",
         ScreenState.PLACEMENT: "piazzamento nuovo edificio",

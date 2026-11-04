@@ -1,4 +1,4 @@
-"""CLI di sviluppo: probe | capture | config-check | adb-check."""
+"""CLI di sviluppo: probe | capture | config-check | adb-check | upgrade-* | attack-scan."""
 from __future__ import annotations
 
 import argparse
@@ -315,8 +315,8 @@ def cmd_adb_check(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_upgrade_engine(config_path: str):
-    """Crea un ``UpgradeEngine`` sul gioco aperto (errore chiaro se manca/minimizzato)."""
+def _load_engine(config_path: str, engine_class=None):
+    """Crea un engine sul gioco aperto (errore chiaro se manca/minimizzato)."""
     from cocbot.app.upgrade_engine import UpgradeEngine
     from cocbot.capture import win32, window
     from cocbot.config import load_config
@@ -330,7 +330,8 @@ def _load_upgrade_engine(config_path: str):
         raise SystemExit("ERRORE: finestra del gioco minimizzata (WGC non cattura finestre minimizzate).")
     game_window = window.GameWindow(info)
     print(f"finestra: {game_window}")
-    return config, UpgradeEngine(game_window, config, log=print)
+    engine_class = engine_class or UpgradeEngine
+    return config, engine_class(game_window, config, log=print)
 
 
 def _upgrade_report_path(out_arg: str | None, prefix: str) -> Path:
@@ -371,7 +372,7 @@ def cmd_upgrade_scan(args: argparse.Namespace) -> int:
     from cocbot.app.upgrade_engine import UpgradeEngineError, save_json
     from cocbot.vision.ocr import OcrUnavailable
 
-    config, engine = _load_upgrade_engine(args.config)
+    config, engine = _load_engine(args.config)
     try:
         report = engine.scan(max_scrolls=args.max_scrolls)
         plan = engine.plan(report)
@@ -405,7 +406,7 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
     from cocbot.app.upgrade_engine import UpgradeEngineError, save_json
     from cocbot.vision.ocr import OcrUnavailable
 
-    config, engine = _load_upgrade_engine(args.config)
+    config, engine = _load_engine(args.config)
     dry_run = not getattr(args, "execute", False)
     try:
         report = engine.scan(max_scrolls=args.max_scrolls)
@@ -440,6 +441,30 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
         print("Installa l'extra OCR: python -m pip install -e .[ocr]")
         return 1
     except UpgradeEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
+
+
+def cmd_attack_scan(args: argparse.Namespace) -> int:
+    """Apre il menu Battle e legge gli elementi principali. Sola lettura: nessun raid."""
+    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+
+    _, engine = _load_engine(args.config, AttackEngine)
+    try:
+        read = engine.scan_battle_menu()
+        print("\n== MENU BATTLE (sola lettura) ==")
+        print(f"  stato: {read.state}")
+        if read.find_match_rect is not None:
+            print(f"  pulsante 'Find a Match': rect={read.find_match_rect} centro={read.find_match_center}")
+        else:
+            print("  pulsante 'Find a Match' NON trovato")
+        for note in read.notes:
+            print(f"  nota: {note}")
+        print("\nNessuna battaglia avviata: comando di sola lettura (non preme 'Find a Match').")
+        return 0
+    except AttackEngineError as exc:
         print(f"ERRORE engine: {exc}")
         return 1
     finally:
@@ -525,6 +550,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="esegue davvero gli upgrade (preme CONFIRM: spende risorse). Default: dry-run.",
     )
     upgrade_run.set_defaults(func=cmd_upgrade_run)
+
+    attack_scan = sub.add_parser(
+        "attack-scan",
+        help="apre il menu Battle e legge gli elementi (sola lettura: nessun raid, nessuna spesa)",
+    )
+    attack_scan.add_argument("--config", default="config/config.example.yaml")
+    attack_scan.set_defaults(func=cmd_attack_scan)
 
     return parser
 

@@ -123,6 +123,20 @@ def test_catalog_row_level_is_target_level() -> None:
     assert mine.cost == mine_dialog.cost
 
 
+def test_network_error_modal_real_frame() -> None:
+    """Il modal di disconnessione reale e' riconosciuto e il pulsante RELOAD GAME localizzato."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    frame = _load("network-error-inactivity.png")
+    assert states.classify(frame) is ScreenState.NETWORK_ERROR
+    point = ui.find_inactivity_modal(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.20 < point[0] / w < 0.60
+    assert 0.40 < point[1] / h < 0.75
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 

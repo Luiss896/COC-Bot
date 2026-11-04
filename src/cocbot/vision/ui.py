@@ -106,6 +106,36 @@ def find_battle_button(image: np.ndarray) -> Rect | None:
     return _rect_from_component(candidates[0]) if candidates else None
 
 
+# regione del pulsante "Find a Match" nel pannello Battle (frazioni del frame)
+BATTLE_MATCH_REGION = (0.03, 0.58, 0.30, 0.25)  # (x, y, w, h)
+
+
+def find_find_match_button(image: np.ndarray) -> Rect | None:
+    """Riquadro del pulsante "Find a Match" del menu Battle (arancione), o ``None``.
+
+    Geometria verificata sul frame fullscreen del dataset: pulsante largo ~0.19 W e alto
+    ~0.10 H nella parte bassa del pannello sinistro. I filtri di aspetto/dimensione evitano
+    i blob gialli della mappa (oro, decorazioni) quando la stessa regione e' visibile.
+    """
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * BATTLE_MATCH_REGION[0])
+    y0 = int(h * BATTLE_MATCH_REGION[1])
+    x1 = int(w * (BATTLE_MATCH_REGION[0] + BATTLE_MATCH_REGION[2]))
+    y1 = int(h * (BATTLE_MATCH_REGION[1] + BATTLE_MATCH_REGION[3]))
+    for component in _yellow_components(image):
+        _area, cx, cy, _x, _y, cw, ch = component
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+            continue
+        if not (0.10 <= cw / w <= 0.30 and 0.06 <= ch / h <= 0.14):
+            continue
+        if cw / max(1, ch) < 2.2:  # pulsante largo e basso, non un edificio
+            continue
+        return _rect_from_component(component)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Chiusura menu Build / dialoghi / piazzamento.
 # ---------------------------------------------------------------------------
