@@ -42,9 +42,13 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.PLACEMENT
     if ui.find_attack_button(image) is not None and ui.find_army_panel_close(image) is not None:
         return ScreenState.ARMY_REVIEW
-    if ui.find_return_home_button(image) is not None:
-        return ScreenState.BATTLE_END
+    # risultati battaglia: "Return Home" verde in basso al centro **senza** il pulsante
+    # "End Battle" (che invece c'e' in battaglia). Nella barra truppe ci sono elementi verdi
+    # (es. "Boost Heroes") che possono somigliare al pulsante: la presenza di End Battle
+    # distingue con certezza la battaglia in corso dai risultati.
     end_battle = ui.find_end_battle_button(image)
+    if ui.find_return_home_button(image) is not None and end_battle is None:
+        return ScreenState.BATTLE_END
     if end_battle is not None:
         # anteprima base: c'e' anche "Next"; battaglia vera: "Next" non c'e' piu'
         if ui.find_next_button(image) is not None:
@@ -56,6 +60,15 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.BUILD_MENU
     if ui.find_find_match_button(image) is not None:
         return ScreenState.BATTLE_MENU
+    # HOME: i pulsanti Battle (basso sinistra) e Build (basso destra) sono marker affidabili:
+    # compaiono solo in home (i pannelli non li mostrano). L'euristica colore resta come fallback,
+    # ma da sola puo' fallire su home con inquadratura zoomata/panoramica (patch basso-centro poco
+    # saturo) — es. dopo un upgrade la home veniva classificata "unknown".
+    has_home_buttons = (
+        ui.find_battle_button(image) is not None and ui.find_build_button(image) is not None
+    )
+    if has_home_buttons:
+        return ScreenState.HOME
     if looks_like_home(image) and not panel_likely_open(image):
         return ScreenState.HOME
     return ScreenState.UNKNOWN

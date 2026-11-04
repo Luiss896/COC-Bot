@@ -9,6 +9,7 @@ from cocbot.app.attack_engine import (
     dark_fallback_decision,
     save_attack_report,
     usable_capacity,
+    usable_dark_capacity,
 )
 from cocbot.app.upgrade_engine import HudRead
 
@@ -109,6 +110,41 @@ def test_apply_capacity_no_op_when_capacity_unknown() -> None:
     loot = LootPreview(gold=800_000, elixir=900_000, dark=None)
     effective = apply_capacity(loot, usable_gold=None, usable_elixir=None)
     assert (effective.gold, effective.elixir, effective.dark) == (800_000, 900_000, None)
+
+
+def test_usable_dark_capacity() -> None:
+    hud = _hud(gold=10_000_000, elixir=10_000_000, dark=194_775)
+    assert usable_dark_capacity(hud, cap_dark=200_000) == 5_225
+    assert usable_dark_capacity(_hud(dark=200_000), cap_dark=200_000) == 0
+    assert usable_dark_capacity(_hud(dark=None), cap_dark=200_000) is None
+
+
+def test_dark_fallback_disabled_when_dark_full() -> None:
+    """Dark al cap (usable_dark == 0): il fallback non deve autorizzare raid inutili."""
+    loot = LootPreview(gold=800_000, elixir=800_000, dark=9_000)
+    assert (
+        dark_fallback_decision(
+            loot,
+            usable_gold=0,
+            usable_elixir=0,
+            usable_dark=0,
+            thresholds=_THRESHOLDS,
+        )
+        is None
+    )
+
+
+def test_farm_stop_reason() -> None:
+    """Dopo un raid attaccato il farm continua; un ciclo senza attacco lo ferma con motivo."""
+    from cocbot.app.attack_engine import farm_stop_reason
+
+    assert farm_stop_reason({"action": "attacked"}) is None
+    storage_reason = farm_stop_reason({"action": "storage_full"})
+    assert storage_reason is not None and "storage" in storage_reason
+    skip_reason = farm_stop_reason({"action": "skip_limit"})
+    assert skip_reason is not None and "skip" in skip_reason
+    unknown = farm_stop_reason({"action": "azione_boh"})
+    assert unknown is not None and "non prevista" in unknown
 
 
 def test_save_attack_report_roundtrip(tmp_path) -> None:

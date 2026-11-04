@@ -147,6 +147,7 @@ class AttackConfig(BaseModel):
     respect_storage_caps: bool = True
     storage_cap_gold: int = Field(default=10_000_000, ge=0)
     storage_cap_elixir: int = Field(default=10_000_000, ge=0)
+    storage_cap_dark: int = Field(default=200_000, ge=0)
     # con oro/elisir al cap (bottino non incassabile) consente un raid "solo dark"
     attack_for_dark_when_full: bool = True
 

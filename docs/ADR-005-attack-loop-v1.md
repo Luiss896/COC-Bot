@@ -133,6 +133,28 @@ Prossimi passi: **early-exit** in battaglia, priorità dark a storage piene, tel
 - **Telemetria**: ogni raid salva un JSON in `out/attack/attack-<timestamp>.json` (gitignored) con
   ricerche/skip, bottini, capacità, esito OCR, HUD prima/dopo e percorso del report.
 
+### Aggiornamento 12:28 — loop farm + fix critico classifier + cap dark 200 000
+
+- **Loop farm** (`attack-farm`, `AttackEngine.run_farm`): ripete `run_attack` con **tetto di spesa**
+  (`--max-gold-spend`, ≈1100 oro per ricerca/Next) e si ferma se un ciclo non porta a un attacco
+  (`farm_stop_reason`: storage piene, limite skip, timeout, ecc.). Live: ciclo 1 = ricerca → fallback
+  "solo dark" → 13 draghi + 2 eroi + 5 spell → early-exit 40% → **victory 54%** → home; ciclo 2
+  interrotto correttamente con `storage_full`. Report in `out/attack/farm-*.json`.
+- **BUG CRITICO corretto (classifier)**: in battaglia gli elementi verdi della barra (es. "Boost
+  Heroes") potevano far sembrare presente il pulsante "Return Home" → lo stato veniva letto come
+  `BATTLE_END` **durante la battaglia**, con tap ripetuti su quell'area (rischio di aprire i boost).
+  Fix: `BATTLE_END` solo se c'è "Return Home" **e non** c'è "End Battle"; `return_home()` non preme
+  nulla se lo stato è `BATTLE`/`PREVIEW`. Test di regressione su frame reale (`battle-boosted-window`).
+  Nota: durante i tap errati la battaglia si è **messa in pausa** ("1X", timer fermo) — recuperata con
+  End Battle → risultati (Victory 66%) → Return Home; **gemme rimaste 1 925** (nessun boost attivato).
+- **Home "unknown" dopo upgrade, corretto**: la home con inquadratura zoomata (patch basso-centro
+  poco saturo) e veniva classificata `unknown`; i pulsanti **Battle+Build** sono marker affidabili
+  (compaiono solo in home), quindi il classifier ora la riconosce comunque (test su `home-zoomed`).
+- **Cap dark 200 000 scoperto**: dopo due raid il dark è arrivato esattamente a 200 000 (cap TH18).
+  Aggiunto `attack.storage_cap_dark` (default 200 000): il cap-aware considera anche il dark, e il
+  fallback "solo dark" è disabilitato quando il dark è pieno. Live: con oro/elisir/dark tutti al cap
+  `run_attack` risponde `storage_full` **senza spendere** (capacità 0/0/0).
+
 ### Aggiornamento 12:11 — fallback **"solo dark"** e **skip in-loop** validati live
 
 - Implementato `dark_fallback_decision` (`attack.attack_for_dark_when_full`): quando oro/elisir sono

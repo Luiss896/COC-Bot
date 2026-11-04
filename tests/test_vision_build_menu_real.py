@@ -229,6 +229,36 @@ def test_events_panel_real_frame_and_close() -> None:
     assert 0.02 < point[1] / h < 0.12
 
 
+def test_home_zoomed_frame_still_home() -> None:
+    """Home con inquadratura zoomata: l'euristica colore da sola fallisce, i pulsanti no.
+
+    Regressione: dopo un upgrade la home era classificata ``unknown`` (patch basso-centro poco
+    saturo) e la chiusura del menu Build veniva considerata fallita. I marker Battle+Build la
+    riconoscono comunque come HOME.
+    """
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import safe_tap, states
+
+    frame = _load("home-zoomed.png")
+    assert safe_tap.panel_likely_open(frame)  # l'euristica colore da sola direbbe "pannello"
+    assert states.classify(frame) is ScreenState.HOME
+
+
+def test_battle_with_green_boost_is_not_battle_end() -> None:
+    """Regressione CRITICA: in battaglia gli elementi verdi (Boost Heroes) non sono "Return Home".
+
+    ``find_return_home_button`` puo' dare un falso positivo su quella barra; il classifier deve
+    restare ``BATTLE`` perche' c'e' anche "End Battle" (e ``return_home`` non deve premere nulla).
+    """
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    frame = _load("battle-boosted-window.png")
+    assert ui.find_end_battle_button(frame) is not None
+    assert states.classify(frame) is ScreenState.BATTLE
+    assert ui.find_return_home_button(frame) is not None  # falso positivo documentato
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 

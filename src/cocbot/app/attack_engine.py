@@ -32,6 +32,29 @@ VK_ESCAPE = 0x1B
 
 DEFAULT_WEIGHTS: dict[str, float] = {"gold": 1.0, "elixir": 1.0, "dark": 100.0}
 
+# costo indicativo di una ricerca base o di uno skip ("Next"), usato per i tetti di spesa
+SEARCH_COST_GOLD = 1_100
+
+# azioni di un ciclo di attacco dopo le quali il farm si ferma (invece di continuare)
+FARM_STOP_ACTIONS: dict[str, str] = {
+    "storage_full": "storage piene e dark insufficiente per il fallback",
+    "skip_limit": "limite di skip/ricerche raggiunto",
+    "search_cap": "tetto ricerche raggiunto",
+    "unreadable_loot": "bottino non leggibile",
+    "battle_end_timeout": "timeout in attesa della fine battaglia",
+    "battle_aborted_home": "battaglia interrotta (ritorno in home)",
+    "next_failed": "'Next' non riuscito",
+    "battle_not_started": "battaglia non iniziata",
+}
+
+
+def farm_stop_reason(cycle_report: dict) -> str | None:
+    """Motivo per fermare il farm dopo un ciclo di attacco; ``None`` se si può continuare."""
+    action = cycle_report.get("action")
+    if action == "attacked":
+        return None
+    return FARM_STOP_ACTIONS.get(action or "", f"azione non prevista: {action}")
+
 
 class AttackEngineError(UpgradeEngineError):
     """Errore bloccante del loop attacco (menu non aperto, chiusura fallita, ecc.)."""
@@ -148,6 +171,11 @@ def usable_capacity(
     return gold, elixir
 
 
+def usable_dark_capacity(hud, *, cap_dark: int) -> int | None:
+    """Capacita' residua del dark elixir (``None`` se non nota)."""
+    return None if hud.dark is None else max(0, cap_dark - hud.dark)
+
+
 def apply_capacity(
     loot: LootPreview,
     *,
@@ -164,11 +192,11 @@ def apply_capacity(
     return LootPreview(gold=gold, elixir=elixir, dark=loot.dark, notes=loot.notes)
 
 
-def save_attack_report(report: dict, out_dir: str | Path = "out/attack") -> Path:
-    """Salva il report di un raid in JSON (telemetria) e ritorna il percorso."""
+def save_attack_report(report: dict, out_dir: str | Path = "out/attack", prefix: str = "attack") -> Path:
+    """Salva il report di un raid/farm in JSON (telemetria) e ritorna il percorso."""
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"attack-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    path = directory / f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -178,6 +206,7 @@ def dark_fallback_decision(
     *,
     usable_gold: int | None,
     usable_elixir: int | None,
+    usable_dark: int | None = None,
     thresholds: dict[str, int] | None = None,
     weights: dict[str, float] | None = None,
 ) -> LootDecision | None:
@@ -185,10 +214,13 @@ def dark_fallback_decision(
 
     Se la capacita' residua rende oro/elisir sotto le soglie ma il **dark elixir** della base
     raggiunge ``dark_min``, autorizza comunque il raid (il dark non e' limitato dalle storage
-    piene). Funzione pura; ``None`` se il fallback non si applica.
+    piene). ``usable_dark == 0`` (dark al cap) disattiva il fallback. Funzione pura; ``None``
+    se il fallback non si applica.
     """
     thresholds = thresholds or {}
     weights = weights or DEFAULT_WEIGHTS
+    if usable_dark == 0:
+        return None
     effective = apply_capacity(loot, usable_gold=usable_gold, usable_elixir=usable_elixir)
     if effective.gold is None or effective.elixir is None:
         return None
@@ -536,6 +568,7 @@ class AttackEngine(UpgradeEngine):
         report["hud_before"] = str(hud)
         usable_gold: int | None = None
         usable_elixir: int | None = None
+        usable_dark: int | None = None
         attack_config = self.config.attack
         if respect_storage_caps and attack_config.respect_storage_caps:
             usable_gold, usable_elixir = usable_capacity(
@@ -543,14 +576,26 @@ class AttackEngine(UpgradeEngine):
                 cap_gold=attack_config.storage_cap_gold,
                 cap_elixir=attack_config.storage_cap_elixir,
             )
-            report["usable_capacity"] = {"gold": usable_gold, "elixir": usable_elixir}
-            if usable_gold == 0 and usable_elixir == 0:
+            usable_dark = usable_dark_capacity(hud, cap_dark=attack_config.storage_cap_dark)
+            report["usable_capacity"] = {
+                "gold": usable_gold,
+                "elixir": usable_elixir,
+                "dark": usable_dark,
+            }
+            gold_elixir_full = usable_gold == 0 and usable_elixir == 0
+            dark_full = usable_dark == 0
+            if gold_elixir_full and dark_full:
                 self.log(
-                    "run_attack: storage piene (oro+elisir al cap): nessuna ricerca avviata"
+                    "run_attack: storage piene (oro+elisir+dark al cap): nessuna ricerca avviata"
                 )
                 report["action"] = "storage_full"
                 self.close_battle_menu()
                 return self._finish_report(report)
+            if gold_elixir_full:
+                self.log(
+                    "run_attack: oro+elisir al cap ma dark disponibile: si procede "
+                    "(il fallback 'solo dark' decidera' sulla base)"
+                )
         skip_session = SkipSession(
             max_skip=max(0, min(self.config.loot.max_skip_per_attack, max_searches - 1)),
             timeout_s=float(self.config.loot.skip_timeout_s),
@@ -580,6 +625,7 @@ class AttackEngine(UpgradeEngine):
                         loot,
                         usable_gold=usable_gold,
                         usable_elixir=usable_elixir,
+                        usable_dark=usable_dark,
                         thresholds={
                             "gold_min": self.config.loot.thresholds.gold_min,
                             "elixir_min": self.config.loot.thresholds.elixir_min,
@@ -685,6 +731,82 @@ class AttackEngine(UpgradeEngine):
                 self.end_battle()
             elif state is ScreenState.BATTLE_END:
                 self.return_home()
+
+    def run_farm(
+        self,
+        *,
+        cycles: int = 2,
+        allow_spend: bool = False,
+        max_searches: int = 1,
+        dragons: int = 13,
+        heroes: bool = True,
+        spells: int = 5,
+        early_exit_damage: int = 40,
+        max_gold_spend: int = 2_200,
+        sleep_between_s: float = 8.0,
+    ) -> dict:
+        """Ripete il ciclo attacco con **tetto di spesa** e si ferma se un ciclo non attacca.
+
+        Spesa stimata = ``ricerche * 1100`` oro (ricerca + eventuali "Next"); il farm non supera
+        ``max_gold_spend``. Dry-run: un solo ``run_attack`` senza spese. Il report complessivo
+        (cicli, spesa, esiti, motivo di stop) viene salvato in ``out/attack/farm-*.json``.
+        """
+        report: dict = {
+            "dry_run": not allow_spend,
+            "cycles_requested": max(1, cycles),
+            "cycles_done": 0,
+            "spent_gold": 0,
+            "max_gold_spend": max_gold_spend,
+            "stopped": None,
+            "reports": [],
+            "report_path": None,
+        }
+        if not allow_spend:
+            cycle_report = self.run_attack(
+                allow_spend=False,
+                max_searches=1,
+                dragons=dragons,
+                heroes=heroes,
+                spells=0,
+                early_exit_damage=0,
+            )
+            report["reports"].append(cycle_report)
+            report["stopped"] = "dry_run"
+            return report
+        for index in range(report["cycles_requested"]):
+            if report["spent_gold"] + SEARCH_COST_GOLD > max_gold_spend:
+                report["stopped"] = (
+                    f"tetto spesa oro ({report['spent_gold']} + {SEARCH_COST_GOLD} > {max_gold_spend})"
+                )
+                break
+            self.log(
+                f"farm: ciclo {index + 1}/{report['cycles_requested']} "
+                f"(speso finora {report['spent_gold']} oro)"
+            )
+            cycle_report = self.run_attack(
+                allow_spend=True,
+                max_searches=max_searches,
+                dragons=dragons,
+                heroes=heroes,
+                spells=spells,
+                early_exit_damage=early_exit_damage,
+            )
+            report["reports"].append(cycle_report)
+            report["cycles_done"] += 1
+            report["spent_gold"] += int(cycle_report.get("searches") or 0) * SEARCH_COST_GOLD
+            reason = farm_stop_reason(cycle_report)
+            if reason is not None:
+                report["stopped"] = reason
+                break
+            if index + 1 < report["cycles_requested"]:
+                time.sleep(max(0.0, sleep_between_s))
+        if report["stopped"] is None:
+            report["stopped"] = "completato"
+        try:
+            report["report_path"] = str(save_attack_report(report, prefix="farm"))
+        except OSError as exc:
+            self.log(f"farm: salvataggio report fallito: {exc}")
+        return report
 
     @staticmethod
     def _region_diff(first, second, region: Rect) -> float:
@@ -793,11 +915,22 @@ class AttackEngine(UpgradeEngine):
         return attempts
 
     def return_home(self) -> bool:
-        """Dalla schermata risultati battaglia: preme "Return Home" e attende la home."""
+        """Dalla schermata risultati battaglia: preme "Return Home" e attende la home.
+
+        Se lo stato e' ancora ``BATTLE``/``PREVIEW`` **non** preme nulla: nella barra truppe
+        ci sono elementi verdi (es. "Boost Heroes") che possono somigliare a "Return Home";
+        in battaglia la chiusura va fatta con ``end_battle``/``end_battle_early``.
+        """
         image = self.grab()
         state = states.classify(image)
         if state is ScreenState.HOME:
             return True
+        if state in (ScreenState.BATTLE, ScreenState.PREVIEW):
+            self.log(
+                f"return_home: stato {state.value}: non premo 'Return Home' "
+                "(serve end_battle/end_battle_early)"
+            )
+            return False
         button = ui.find_return_home_button(image)
         if button is None:
             self.log(f"return_home: pulsante Return Home non trovato (stato {state.value})")

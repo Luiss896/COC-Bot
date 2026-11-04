@@ -543,7 +543,10 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             print(f"  early-exit a danno {report.get('early_exit_damage_pct')}%")
         capacity = report.get("usable_capacity")
         if capacity:
-            print(f"  capacità residua: oro={capacity['gold']} elisir={capacity['elixir']}")
+            print(
+                f"  capacità residua: oro={capacity['gold']} elisir={capacity['elixir']} "
+                f"dark={capacity.get('dark')}"
+            )
         if report.get("skip_limit_reason"):
             print(f"  limite skip: {report['skip_limit_reason']}")
         if report.get("dark_fallback"):
@@ -573,6 +576,55 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             print(f"  HUD prima: {report['hud_before']}")
         if report.get("hud_after"):
             print(f"  HUD dopo:  {report['hud_after']}")
+        if report.get("report_path"):
+            print(f"  report telemetria: {report['report_path']}")
+        return 0
+    except AttackEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
+
+
+def cmd_attack_farm(args: argparse.Namespace) -> int:
+    """Loop di raid ripetuti con tetto di spesa e stop automatico (dry-run di default).
+
+    Il farm si ferma se un ciclo non porta a un attacco (es. storage piene senza dark),
+    oppure prima di superare ``--max-gold-spend`` (≈1100 oro per ricerca/Next).
+    """
+    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+
+    _, engine = _load_engine(args.config, AttackEngine)
+    try:
+        report = engine.run_farm(
+            cycles=max(1, args.cycles),
+            allow_spend=args.allow_spend,
+            max_searches=max(1, args.max_searches),
+            dragons=max(1, args.dragons),
+            heroes=not args.no_heroes,
+            spells=max(0, args.spells),
+            early_exit_damage=max(0, args.early_exit_damage),
+            max_gold_spend=max(0, args.max_gold_spend),
+        )
+        print("\n== ATTACK FARM ==")
+        print(
+            f"  dry_run={report['dry_run']} cicli={report['cycles_done']}/"
+            f"{report['cycles_requested']} speso≈{report['spent_gold']} oro "
+            f"tetto={report['max_gold_spend']}"
+        )
+        print(f"  stop: {report['stopped']}")
+        for index, cycle in enumerate(report["reports"], start=1):
+            result = cycle.get("result") or {}
+            print(
+                f"  ciclo {index}: azione={cycle['action']} ricerche={cycle['searches']} "
+                f"skip={cycle['skips']} esito={result.get('outcome')} "
+                f"danno={result.get('damage_pct')}% "
+                f"bottino={result.get('loot_gold')}/{result.get('loot_elixir')}/{result.get('loot_dark')}"
+            )
+            if cycle.get("dark_fallback"):
+                print("    (attacco 'solo dark': oro/elisir limitati dalla capacità)")
+            if cycle.get("early_exit"):
+                print(f"    (early-exit a {cycle.get('early_exit_damage_pct')}%)")
         if report.get("report_path"):
             print(f"  report telemetria: {report['report_path']}")
         return 0
@@ -718,6 +770,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="se >0: durante la battaglia esce quando 'Overall Damage' raggiunge questa %%",
     )
     attack_run.set_defaults(func=cmd_attack_run)
+
+    attack_farm = sub.add_parser(
+        "attack-farm",
+        help="loop di raid ripetuti con tetto di spesa e stop automatico (dry-run di default)",
+    )
+    attack_farm.add_argument("--config", default="config/config.example.yaml")
+    attack_farm.add_argument(
+        "--allow-spend",
+        action="store_true",
+        help="esegue davvero i raid (~1100 oro per ricerca/Next); default dry-run",
+    )
+    attack_farm.add_argument("--cycles", type=int, default=2)
+    attack_farm.add_argument("--max-searches", type=int, default=1)
+    attack_farm.add_argument("--dragons", type=int, default=13)
+    attack_farm.add_argument("--no-heroes", action="store_true")
+    attack_farm.add_argument("--spells", type=int, default=5)
+    attack_farm.add_argument(
+        "--early-exit-damage",
+        type=int,
+        default=40,
+        help="soglia 'Overall Damage' per l'early-exit (0 = disattivo)",
+    )
+    attack_farm.add_argument(
+        "--max-gold-spend",
+        type=int,
+        default=2200,
+        help="tetto di spesa stimata in oro per l'intero farm (1100 per ricerca/Next)",
+    )
+    attack_farm.set_defaults(func=cmd_attack_farm)
 
     return parser
 
