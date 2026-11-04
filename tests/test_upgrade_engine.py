@@ -4,9 +4,11 @@ from __future__ import annotations
 from cocbot.app.upgrade_engine import (
     HudRead,
     ScanReport,
+    UpgradeCandidate,
     UpgradeEngine,
     build_plan,
     categorize,
+    filter_plan_by_budget,
     priority_list,
 )
 from cocbot.config.models import Config
@@ -120,6 +122,89 @@ def test_build_plan_only_filter_targets_single_row() -> None:
     # target inesistente: nessun candidato
     plan3 = build_plan(Config(), _report(rows), only="Drago")
     assert plan3.chosen == []
+
+
+def test_builder_consumed_variants() -> None:
+    """Verifica builder tollerante: totale aumentato (5->6) vale come consumo riuscito."""
+    from cocbot.app.upgrade_engine import builder_consumed
+
+    assert (
+        builder_consumed(
+            _hud(builders_available=1, builders_total=5),
+            _hud(builders_available=0, builders_total=5),
+        )
+        is True
+    )
+    assert (
+        builder_consumed(
+            _hud(builders_available=1, builders_total=5),
+            _hud(builders_available=1, builders_total=6),
+        )
+        is True
+    )
+    assert (
+        builder_consumed(
+            _hud(builders_available=1, builders_total=5),
+            _hud(builders_available=1, builders_total=5),
+        )
+        is False
+    )
+    unknown = _hud(builders_available=None, builders_total=None)
+    assert builder_consumed(unknown, _hud()) is None
+
+
+def test_build_plan_only_matches_merged_rows_with_count() -> None:
+    """``--only`` deve funzionare anche sulle righe merge con contatore ('x N')."""
+    rows = [
+        _row("Dark Elixir Drill x 3 x3", cost=1_850_000, currency="elixir", scroll_index=0),
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=1),
+    ]
+    rich = _hud(elixir=5_000_000)
+    plan = build_plan(Config(), _report(rows, hud=rich), only="Dark Elixir Drill")
+    assert [item.row.name for item in plan.chosen] == ["dark elixir drill x 3 x3"]
+    # match esatto ancora valido
+    plan2 = build_plan(Config(), _report(rows, hud=rich), only="Cannon")
+    assert [item.row.name for item in plan2.chosen] == ["cannon"]
+
+
+def test_filter_plan_by_budget_and_max_upgrades() -> None:
+    """Tetti di spesa cumulativi: scarta i candidati che sforano, senza bloccare i successivi."""
+    from cocbot.app.upgrade_engine import UpgradePlan
+
+    rows = [
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=0),
+        _row("Archer Tower", cost=800_000, currency="gold", scroll_index=1),
+        _row("Mortar", cost=200_000, currency="gold", scroll_index=2),
+    ]
+    candidates = [
+        UpgradeCandidate(row=row, category=categorize(row.name) or "other", priority_index=0)
+        for row in rows
+    ]
+    plan = UpgradePlan(hud=_hud(), scanned_rows=3, candidates=candidates, chosen=list(candidates))
+    filtered = filter_plan_by_budget(plan, budgets={"gold": 300_000}, max_upgrades=3)
+    names = [item.row.name for item in filtered.chosen]
+    # cannon 100k (resta 200k), archer tower 800k fuori budget, mortar 200k (resta 0)
+    assert names == ["cannon", "mortar"]
+    reasons = " | ".join(item.reason for item in filtered.skipped)
+    assert "fuori budget gold" in reasons
+    assert any("tetti spesa" in note for note in filtered.notes)
+    # limite numero upgrade
+    limited = filter_plan_by_budget(plan, max_upgrades=1)
+    assert len(limited.chosen) == 1
+    # nessun tetto: piano invariato
+    unchanged = filter_plan_by_budget(plan)
+    assert [item.row.name for item in unchanged.chosen] == [item.row.name for item in plan.chosen]
+
+
+def test_filter_plan_budget_ignores_unknown_currency_cap() -> None:
+    """Un tetto per una valuta diversa non tocca i candidati di altre valute."""
+    from cocbot.app.upgrade_engine import UpgradePlan
+
+    row = _row("Cannon", cost=100_000, currency="gold")
+    candidate = UpgradeCandidate(row=row, category="defense", priority_index=1)
+    plan = UpgradePlan(hud=_hud(), scanned_rows=1, candidates=[candidate], chosen=[candidate])
+    filtered = filter_plan_by_budget(plan, budgets={"dark": 1})
+    assert [item.row.name for item in filtered.chosen] == ["cannon"]
 
 
 def test_build_plan_walls_can_be_disabled() -> None:

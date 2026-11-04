@@ -184,6 +184,23 @@
   (default true), `upgrade.dry_run`, `upgrade.max_scan_scrolls`, `attack.use_heroes`,
   `attack.heroes_require_ready`.
 
+### Aggiornamento 4 nov 12:49 — tetti di spesa, preset B, verifica builder, finestra minimizzata
+
+- **Tetti di spesa per upgrade**: `upgrade-run --max-gold/--max-elixir/--max-dark` (tetti cumulativi
+  per il ciclo) e `--max-upgrades N`; funzione pura `filter_plan_by_budget` (testata) che scarta i
+  candidati che sforano senza bloccare i successivi. Live: `--execute --max-gold 1500000
+  --max-upgrades 1` → **Wall 12→13, oro −750 000** verificato con HUD (budget rispettato).
+- **`--only` e righe merge**: corretto il filtro per i nomi con contatore (es. `"Dark Elixir Drill
+  x 3 x3"`): ora `--only "Dark Elixir Drill"` funziona (helper `only_name_matches` + test).
+- **Preset B live**: con `walls.reserve_builder_for_walls: false` (config temporanea) il planner
+  assegna il builder libero agli edifici; eseguito **Dark Elixir Storage** (−1 900 000 elisir).
+- **Verifica builder tollerante** (`builder_consumed`): se il gioco **aumenta il totale builder**
+  (osservato 5→6) la verifica non deve fallire quando l'upgrade è comunque applicato (risorse
+  scalate). Helper puro + test; il caso reale era stato marcato "FALLITO" per un falso negativo.
+- **Finestra gioco minimizzata**: `find_game_window` ora ripristina automaticamente la finestra
+  minimizzata (`ShowWindow SW_RESTORE`), così `probe` e tutte le CLI funzionano anche se il sistema
+  ha minimizzato il gioco (validato live: "gioco non in esecuzione" → ripristino → home).
+
 ### Aggiornamento 4 nov 11:47 — planner `--only` end-to-end con `--execute` VALIDATO live
 
 - **`upgrade-run --execute --only "<nome>"`** completa il ciclo reale planner→navigazione→dialogo→

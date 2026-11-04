@@ -45,9 +45,31 @@ def find_game_windows() -> list[win32.WindowInfo]:
     return sorted((w for w in find_windows() if is_game_window(w)), key=lambda w: w.area, reverse=True)
 
 
-def find_game_window() -> win32.WindowInfo | None:
+def find_game_window(*, restore_minimized: bool = True) -> win32.WindowInfo | None:
+    """Finestra del gioco se visibile; se e' **minimizzata** la ripristina (SW_RESTORE).
+
+    GPGPC puo' minimizzare la finestra del gioco (es. per inattivita' del sistema): il processo
+    resta vivo ma la finestra non ha area client, quindi ``find_windows`` non la vede. In quel
+    caso la si ripristina automaticamente (comportamento voluto: i comandi CLI funzionano anche
+    se l'utente/il sistema ha minimizzato il gioco).
+    """
     windows = find_game_windows()
-    return windows[0] if windows else None
+    if windows:
+        return windows[0]
+    if not restore_minimized:
+        return None
+    minimized = [
+        w
+        for w in win32.list_windows(visible_only=False)
+        if is_game_window(w) and win32.is_minimized(w.hwnd)
+    ]
+    for candidate in minimized:
+        win32.user32.ShowWindow(win32.HWND(candidate.hwnd), win32.SW_RESTORE)
+        time.sleep(0.8)
+        restored = find_game_windows()
+        if restored:
+            return restored[0]
+    return None
 
 
 def find_launcher_window() -> win32.WindowInfo | None:

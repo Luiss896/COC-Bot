@@ -401,6 +401,33 @@ def walls_status(report: ScanReport) -> str:
     return "available" if any(row.cost is not None for row in wall_rows) else "max"
 
 
+def builder_consumed(before: HudRead, after: HudRead) -> bool | None:
+    """True se un builder e' stato consumato (o il **totale** builder e' aumentato); None se ignoto.
+
+    Verificare solo ``builders_available`` e' fragile: a volte il gioco aumenta il totale
+    (es. builder extra della Builder Base sincronizzati) e l'upgrade risulta comunque applicato
+    (risorse scalate). In quel caso la verifica builder non deve fallire.
+    """
+    if not (before.builders_known and after.builders_known):
+        return None
+    if (after.builders_available or 0) < (before.builders_available or 0):
+        return True
+    return (after.builders_total or 0) > (before.builders_total or 0)
+
+
+def only_name_matches(row_name: str, only_canonical: str) -> bool:
+    """True se la riga corrisponde al filtro ``--only``.
+
+    Gestisce anche le righe **merge** con contatore (es. ``"Dark Elixir Drill x 3 x3"``): il
+    filtro confronta la parte base del nome, cosi' ``--only "Dark Elixir Drill"`` funziona.
+    """
+    normalized = canonical_name(row_name)
+    if normalized == only_canonical:
+        return True
+    base = normalized.split(" x ")[0]
+    return base == only_canonical
+
+
 def build_plan(config: Config, report: ScanReport, *, only: str | None = None) -> UpgradePlan:
     """Calcola il piano di upgrade da una scansione (funzione pura, testabile offline).
 
@@ -423,7 +450,7 @@ def build_plan(config: Config, report: ScanReport, *, only: str | None = None) -
         if category is None:
             plan.skipped.append(SkippedRow(row, "nome non riconosciuto (OCR/allowlist)"))
             continue
-        if only_norm is not None and canonical_name(row.name) != only_norm:
+        if only_norm is not None and not only_name_matches(row.name, only_norm):
             plan.skipped.append(SkippedRow(row, f"escluso dal filtro --only {only!r}"))
             continue
         if category in ignore:
@@ -1228,10 +1255,8 @@ class UpgradeEngine:
             raise UpgradeEngineError("menu Build non chiuso dopo l'upgrade")
         after = self.read_hud(self.grab())
         if self.config.upgrade.verify_after_upgrade:
-            builders_consumed = after.builders_known and before.builders_known and (
-                (after.builders_available or 0) < (before.builders_available or 0)
-            )
-            if after.builders_known and before.builders_known and not builders_consumed:
+            consumed = builder_consumed(before, after)
+            if consumed is False:
                 raise UpgradeEngineError("verifica fallita: builder non consumato")
             available_before = before.amount(row.currency)
             available_after = after.amount(row.currency)
@@ -1260,6 +1285,53 @@ def save_json(path: str | Path, payload: dict) -> Path:
     return target
 
 
+def filter_plan_by_budget(
+    plan: UpgradePlan,
+    *,
+    budgets: dict[str, int] | None = None,
+    max_upgrades: int | None = None,
+) -> UpgradePlan:
+    """Riduce ``plan.chosen`` rispettando tetti di spesa per valuta e numero massimo di upgrade.
+
+    ``budgets`` (oro/elisir/dark) sono tetti **cumulativi** per il ciclo: un candidato che
+    sforerebbe il tetto viene scartato (senza bloccare i successivi). Funzione pura: usata per
+    spendere in modo controllato quando le risorse sono al cap (``upgrade-run --max-gold ...``).
+    """
+    remaining = {key: int(value) for key, value in (budgets or {}).items() if value is not None}
+    filtered: list[UpgradeCandidate] = []
+    skipped: list[SkippedRow] = list(plan.skipped)
+    for candidate in plan.chosen:
+        if max_upgrades is not None and len(filtered) >= max_upgrades:
+            skipped.append(
+                SkippedRow(candidate.row, f"escluso dal limite di {max_upgrades} upgrade")
+            )
+            continue
+        currency = candidate.row.currency
+        cost = candidate.row.cost or 0
+        if currency in remaining and cost > remaining[currency]:
+            skipped.append(
+                SkippedRow(
+                    candidate.row,
+                    f"fuori budget {currency}: serve {cost}, restano {remaining[currency]}",
+                )
+            )
+            continue
+        if currency in remaining:
+            remaining[currency] -= cost
+        filtered.append(candidate)
+    notes = list(plan.notes)
+    if budgets or max_upgrades is not None:
+        notes.append(f"tetti spesa: budgets={budgets or {}}, max_upgrades={max_upgrades}")
+    return UpgradePlan(
+        hud=plan.hud,
+        scanned_rows=plan.scanned_rows,
+        candidates=plan.candidates,
+        skipped=skipped,
+        chosen=filtered,
+        notes=notes,
+    )
+
+
 __all__ = [
     "CATEGORY_KEYWORDS",
     "DEFAULT_PRIORITY",
@@ -1272,9 +1344,12 @@ __all__ = [
     "UpgradeEngineError",
     "UpgradePlan",
     "build_plan",
+    "builder_consumed",
     "canonical_name",
     "categorize",
+    "filter_plan_by_budget",
     "merge_rows",
+    "only_name_matches",
     "priority_list",
     "save_json",
     "walls_status",
