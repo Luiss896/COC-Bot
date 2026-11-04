@@ -68,6 +68,40 @@ def test_evaluate_loot_weights_from_config() -> None:
     assert DEFAULT_WEIGHTS["dark"] == 100.0
 
 
+def test_skip_session_limits() -> None:
+    from cocbot.app.attack_engine import SkipSession
+
+    session = SkipSession(max_skip=3, timeout_s=60.0)
+    session.start(100.0)
+    assert session.can_continue(100.0) == (True, "")
+    assert session.record_skip(101.0)[0]
+    assert session.record_skip(102.0)[0]
+    ok, reason = session.record_skip(105.0)
+    assert not ok
+    assert "limite di skip" in reason
+
+
+def test_skip_session_timeout() -> None:
+    from cocbot.app.attack_engine import SkipSession
+
+    session = SkipSession(max_skip=40, timeout_s=90.0)
+    session.start(0.0)
+    assert session.can_continue(89.9)[0]
+    ok, reason = session.can_continue(90.0)
+    assert not ok
+    assert "timeout" in reason
+    assert session.elapsed_s(95.0) == 95.0
+
+
+def test_skip_session_zero_limits_mean_unlimited() -> None:
+    from cocbot.app.attack_engine import SkipSession
+
+    session = SkipSession(max_skip=0, timeout_s=0.0)
+    session.start(0.0)
+    for _ in range(50):
+        assert session.record_skip(1.0)[0]
+
+
 @dataset
 def test_battle_menu_frame_is_classified() -> None:
     from cocbot.core.types import ScreenState

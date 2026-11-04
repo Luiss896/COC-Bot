@@ -94,6 +94,41 @@ class BattleMenuRead:
     notes: tuple[str, ...] = ()
 
 
+@dataclass
+class SkipSession:
+    """Contatore e timer degli skip durante la ricerca della base (config ``loot.*``).
+
+    Regole documentate nel piano di progetto: ``loot.max_skip_per_attack`` e
+    ``loot.skip_timeout_s`` limitano quanti villaggi saltare e per quanto tempo cercare.
+    Classe pura (nessun I/O): il chiamante passa ``now`` (``time.monotonic()``).
+    """
+
+    max_skip: int
+    timeout_s: float
+    skips: int = 0
+    started_at: float | None = None
+
+    def start(self, now: float) -> None:
+        self.started_at = now
+        self.skips = 0
+
+    def elapsed_s(self, now: float) -> float:
+        return 0.0 if self.started_at is None else max(0.0, now - self.started_at)
+
+    def can_continue(self, now: float) -> tuple[bool, str]:
+        """(True, "") se si puo' ancora cercare/saltare; altrimenti (False, motivo)."""
+        if self.max_skip > 0 and self.skips >= self.max_skip:
+            return False, f"limite di skip raggiunto ({self.skips}/{self.max_skip})"
+        if self.timeout_s > 0 and self.started_at is not None and self.elapsed_s(now) >= self.timeout_s:
+            return False, f"timeout ricerca base ({self.timeout_s:.0f}s)"
+        return True, ""
+
+    def record_skip(self, now: float) -> tuple[bool, str]:
+        """Registra uno skip e dice se si puo' continuare."""
+        self.skips += 1
+        return self.can_continue(now)
+
+
 class AttackEngine(UpgradeEngine):
     """Engine del loop attacco: v1 apre/legge/chiude il menu Battle, senza combattere."""
 
@@ -158,5 +193,6 @@ __all__ = [
     "BattleMenuRead",
     "DEFAULT_WEIGHTS",
     "LootDecision",
+    "SkipSession",
     "evaluate_loot",
 ]

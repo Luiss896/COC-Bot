@@ -26,6 +26,8 @@ V1 in **sola lettura**, in quattro parti:
    si attacca solo se oro/elisir/dark raggiungono le soglie **e** lo score pesato (dark ×100 di
    default) raggiunge `score_min`; **bottino illeggibile → mai attaccare**; `dark=None` non blocca
    (il bottino dark puo' mancare). E' una funzione pura, usata dall'engine e testata off-line.
+   Insieme: `SkipSession` (contatori puri di `loot.max_skip_per_attack` e `loot.skip_timeout_s`,
+   con motivo d'arresto) — il collegamento al flusso live arrivera' con i frame di anteprima.
 3. **`AttackEngine`** (sottoclasse di `UpgradeEngine`, che riusa navigazione prudente e recovery):
    `open_battle_menu()` (tap sul pulsante Battle, attesa `BATTLE_MENU`), `close_battle_menu()`
    (ESC via messaggio Win32, fallback `recover_home`), `scan_battle_menu()` (apre/legge/chiude).
@@ -40,7 +42,7 @@ V1 in **sola lettura**, in quattro parti:
 - Nessun falso positivo su `01_home.png` e `02_build_menu.png` (pulsante assente).
 - Policy loot: casi buono / sotto soglia / score insufficiente / bottino illeggibile /
   dark assente / pesi da config.
-- 10 test dedicati (`tests/test_attack_engine.py`), suite totale verde, ruff pulito.
+- 13 test dedicati (`tests/test_attack_engine.py`), suite totale verde, ruff pulito.
 
 ## Limiti noti / da validare a runtime
 
