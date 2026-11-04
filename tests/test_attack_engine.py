@@ -224,6 +224,25 @@ def test_scout_loot_ocr_real_frame() -> None:
     assert preview.notes == ()
 
 
+@scout_dataset
+def test_battle_phase_frame_and_grid() -> None:
+    """Frame live della battaglia: stato BATTLE e griglia di deploy sicura (no pulsanti)."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    image = _load_build("battle-phase-window.png")
+    assert states.classify(image) is ScreenState.BATTLE
+    points = ui.battle_field_grid(image)
+    h, w = image.shape[:2]
+    assert len(points) >= 60
+    for x, y in points:
+        assert 0 < x < w and 0 < y < h
+        assert not (x / w < 0.20 and 0.72 < y / h < 0.88)  # End Battle
+        assert not (x / w > 0.86 and 0.72 < y / h < 0.88)  # Overall Damage
+    # il pulsante Return Home non deve esistere in battaglia
+    assert ui.find_return_home_button(image) is None
+
+
 @dataset
 def test_home_frame_still_classified_home() -> None:
     from cocbot.core.types import ScreenState

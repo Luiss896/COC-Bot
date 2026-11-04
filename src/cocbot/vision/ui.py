@@ -277,6 +277,31 @@ def find_deploy_candidates(image: np.ndarray, *, limit: int = 14) -> list[tuple[
     return [(cx, cy) for _distance, cx, cy in candidates[:limit]]
 
 
+def battle_field_grid(image: np.ndarray) -> list[tuple[int, int]]:
+    """Griglia di punti sul campo di battaglia (esclusi HUD e pulsanti), per lo sweep di deploy.
+
+    I tap fuori bersaglio **ispezionano soltanto** (tooltip), non hanno effetti collaterali; sulle
+    tessere di erba libera deployano. La griglia esclude le zone dei pulsanti "End Battle"
+    (basso sinistra) e "Overall Damage" (basso destra) per non terminare la battaglia per errore,
+    e la barra truppe (sotto 0,86 H). Ordinata dal centro verso l'esterno.
+    """
+    if not _valid(image):
+        return []
+    h, w = image.shape[:2]
+    points: list[tuple[int, int]] = []
+    for yi in range(8):
+        fy = 0.10 + yi * 0.10
+        for xi in range(13):
+            fx = 0.04 + xi * 0.075
+            if fx < 0.20 and 0.72 < fy < 0.88:  # End Battle
+                continue
+            if fx > 0.86 and 0.72 < fy < 0.88:  # Overall Damage
+                continue
+            points.append((int(round(fx * w)), int(round(fy * h))))
+    points.sort(key=lambda p: (abs(p[0] - w * 0.5) + abs(p[1] - h * 0.45)))
+    return points
+
+
 # risultati battaglia: pulsante verde "Return Home" in basso al centro (misura live
 # 4 nov 1733x975: rect (756,795,224,56) -> centro (0,501 W, 0,844 H), aspetto 4,0)
 BATTLE_END_RETURN_REGION = (0.36, 0.79, 0.28, 0.12)

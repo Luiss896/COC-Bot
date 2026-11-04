@@ -345,35 +345,42 @@ class AttackEngine(UpgradeEngine):
         if a.shape != b.shape or a.size == 0:
             return -1.0
         return float(cv2.absdiff(a, b).mean())
+
     def deploy_dragon_spam(
         self,
         image: np.ndarray,
         *,
         dragons: int = 13,
         heroes: bool = True,
+        max_taps: int = 90,
     ) -> int:
-        """Deploya i draghi sulle tessere di erba libera, adattandosi alla selezione.
+        """Deploya i draghi con **sweep a griglia** sul campo, verificando il contatore.
 
-        Misura live: tap sulla card = selezione (la card si ingrandisce); tap su erba libera =
-        una truppa deployata; tap su edifici/muri = ispezione (nessun deploy). Il contatore
-        della card ("xN") viene confrontato tra frame per capire se il deploy e' avvenuto;
-        se non cambia per 2 tentativi la card viene riselezionata. Ritorna i tap inviati.
+        Misura live: tap sulla card = selezione; tap su **erba libera** = una truppa deployata;
+        tap su edifici/muri = sola ispezione (nessun effetto). Si provano prima le tessere di
+        erba rilevate e poi una griglia di punti: il contatore della card ("xN") viene
+        confrontato per differenza immagine per capire quando il deploy e' avvenuto; se non
+        cambia per 5 tentativi la card viene riselezionata. Ritorna i tap inviati.
         """
         h, w = image.shape[:2]
-        candidates = ui.find_deploy_candidates(image, limit=max(dragons + 2, 8))
-        if not candidates:
-            self.log("deploy: nessuna tessera di erba libera trovata")
+        candidates = ui.find_deploy_candidates(image, limit=max(dragons, 6))
+        grid = ui.battle_field_grid(image)
+        points: list[tuple[int, int]] = []
+        for point in candidates + grid:
+            if point not in points:
+                points.append(point)
+        if not points:
+            self.log("deploy: nessun punto di deploy trovato")
             return 0
         count_region = Rect(int(w * 0.168), int(h * 0.848), int(w * 0.042), int(h * 0.034))
         card = ui.battle_card_point(image, ui.BATTLE_DRAGON_CARD)
-        self.log(f"deploy: seleziono i draghi @ {card} ({len(candidates)} tessere candidate)")
+        self.log(f"deploy: seleziono i draghi @ {card} ({len(candidates)} erba + {len(grid)} griglia)")
         self._tap(card, wait_s=0.5)
         previous = self.grab()
         deployed = 0
         misses = 0
         attempts = 0
-        while deployed < dragons and attempts < dragons * 3:
-            point = candidates[attempts % len(candidates)]
+        for point in points[:max_taps]:
             self._tap(point, wait_s=0.35)
             attempts += 1
             current = self.grab()
@@ -382,9 +389,11 @@ class AttackEngine(UpgradeEngine):
             if changed:
                 deployed += 1
                 misses = 0
+                if deployed >= dragons:
+                    break
             else:
                 misses += 1
-                if misses >= 2:
+                if misses >= 5:
                     self.log("deploy: contatore invariato, riseleziono la card")
                     self._tap(card, wait_s=0.3)
                     misses = 0
@@ -396,7 +405,7 @@ class AttackEngine(UpgradeEngine):
                 hero_card = ui.battle_card_point(image, fraction)
                 self.log(f"deploy: provo l'eroe {label} @ {hero_card}")
                 self._tap(hero_card, wait_s=0.4)
-                self._tap(candidates[attempts % len(candidates)], wait_s=0.3)
+                self._tap(points[attempts % len(points)], wait_s=0.3)
                 attempts += 1
         self.log(f"deploy: truppe deployate rilevate={deployed}, tap={attempts}")
         return attempts
