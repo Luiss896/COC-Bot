@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from cocbot.app.upgrade_engine import UpgradeEngine, UpgradeEngineError
+from cocbot.capture import win32
 from cocbot.core.types import Rect, ScreenState
 from cocbot.vision import ocr as ocr_module
 from cocbot.vision import states, textparse, ui
@@ -346,6 +347,22 @@ class AttackEngine(UpgradeEngine):
         if a.shape != b.shape or a.size == 0:
             return -1.0
         return float(cv2.absdiff(a, b).mean())
+
+    def pan_camera(self, dx_fraction: float = 0.25, dy_fraction: float = 0.0, *, image=None) -> None:
+        """Panna la camera del campo con un drag via messaggi Win32 (nessuna truppa selezionata).
+
+        Verificato live: il drag sposta la vista e rivela la zona deployabile (erba con tessere
+        tratteggiate) attorno al villaggio nemico; deve avvenire **prima** di selezionare la
+        truppa (con una truppa selezionata il drag sul campo non panna).
+        """
+        frame = image if image is not None else self.grab()
+        h, w = frame.shape[:2]
+        x0, y0 = int(w * 0.55), int(h * 0.45)
+        x1 = int(x0 - w * dx_fraction)
+        y1 = int(y0 - h * dy_fraction)
+        win32.post_mouse_drag(self.window.hwnd, x0, y0, x1, y1, steps=12, hold_ms=60)
+        time.sleep(0.6)
+        self.log(f"pan_camera: drag ({x0},{y0})->({x1},{y1})")
 
     def deploy_dragon_spam(
         self,

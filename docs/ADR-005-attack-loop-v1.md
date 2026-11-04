@@ -1,9 +1,9 @@
-# ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v3)
+# ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v5)
 
-**Data:** 2026-11-04 · **Stato:** implementata e validata live fino alla **battaglia reale**
-(menu Battle, My Army, anteprima base con OCR loot, stati `BATTLE`/`BATTLE_END`, uscita sicura).
-**Deploy sperimentale**: 4 draghi deployati su una battaglia reale (11% danno, Defeat); il deploy
-affidabile, lo skip reale e la gestione esiti non sono ancora completi.
+**Data:** 2026-11-04 · **Stato:** implementata e **validata live end-to-end**: menu Battle, My Army,
+anteprima con OCR loot, battaglia, **camera pan + deploy di 13 draghi e 2 eroi**, esito
+(Victory 1 stella), bottino incassato e ritorno in home (gemme mai spese). Restano skip reale,
+OCR esiti e spell.
 
 ## Contesto
 
@@ -94,15 +94,28 @@ skip) devono essere esplicite e tracciate.
   aspettare in due/tre passate con pause più lunghe. Eroi: tentati, non ancora deployati.
 - Frame risultati con bottino salvato in `dataset/build-win-20261103/battle-results-loot-window.png`.
 
+### Aggiornamento 11:16 — camera pan + raid completo **VINTO** (13 draghi + 2 eroi)
+
+- **Camera pan validato**: drag sul campo via `PostMessage` (`win32.post_mouse_drag`) **prima** di
+  selezionare la truppa: la vista si sposta e rivela la zona deployabile (erba con tessere
+  tratteggiate) attorno al villaggio. Con la truppa selezionata il drag non panna.
+- **Deploy completo**: pan → selezione draghi → tap sulle tessere di erba rivelate (due passate,
+  contatore verificato per diff) → **13 draghi su 13 deployati** → eroi (**AQ 65 + Grand Warden 40**
+  deployati con card+tap). Risultato live: **VICTORY, 1 stella, 15% danno**; "Troops expended:
+  x13 draghi + AQ + GW"; bottino battaglia **59 023 oro / 53 271 elisir / 1 296 dark**
+  (HUD +288 399 oro / +265 118 elisir / +6 326 dark); ritorno in home OK; gemme 1 925 invariate.
+- Frame vittoria salvato in `dataset/build-win-20261103/battle-end-victory-window.png`.
+- **Il loop attacco è quindi validato end-to-end**: ricerca → My Army → battaglia → pan+deploy →
+  esito (Vittoria/Sconfitta) → bottino → "Return Home".
+
 ## Limiti noti / da validare
 
-- **Deploy**: funziona (6 draghi, 14% danno, bottino incassato) ma restano truppe non schierate per
-  le poche tessere visibili: serve **camera pan** e/o passate multiple piu' lunghe. Eroi/spell:
-  tentati, non ancora deployati.
-- **"Next"** (skip reale) non e' stato premuto live: ogni skip costa ~1100 oro.
-- `SkipSession` e policy loot sono pronte ma non collegate a un loop skip+attack completo.
-- I raid eseguiti sono finiti in **Defeat** (nessuna stella, ma con bottino): strategia da tarare
-  (camera pan, eroi/spell, early-exit).
+- **Skip reale ("Next")**: mai premuto live (costa ~1 100 oro); `SkipSession` pronta ma non collegata.
+- **Spell**: mai deployate; da provare (card spell in barra).
+- **OCR esiti**: il banner Victoy/Defeat, le stelle, il % danno e "You got" non hanno ancora un
+  parser: si leggono a video ma non sono automatizzati (prossimo passo per il loop con early-exit).
+- **Robustezza deploy**: dipende dal rilevamento dell'erba per-base/camera; con pan funziona, ma
+  vanno provate più basi e fallback (griglia già in uso).
 
 ## Conseguenze
 

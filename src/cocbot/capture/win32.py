@@ -341,6 +341,38 @@ def post_mouse_click(hwnd: int, client_x: int, client_y: int, hold_ms: int = 40)
     return ok_move and ok_down and ok_up
 
 
+def post_mouse_drag(
+    hwnd: int,
+    client_x0: int,
+    client_y0: int,
+    client_x1: int,
+    client_y1: int,
+    *,
+    steps: int = 10,
+    hold_ms: int = 80,
+) -> bool:
+    """Drag sinistro via ``PostMessage`` (nessun focus, nessun cursore reale).
+
+    Utile in gioco per pannare la camera: pressione, movimento a passi, rilascio.
+    Ritorna False se un messaggio non e' stato accodato.
+    """
+    lp_start = _make_lparam(client_x0, client_y0)
+    ok = bool(user32.PostMessageW(HWND(hwnd), WM_MOUSEMOVE, 0, lp_start))
+    time.sleep(0.02)
+    ok = bool(user32.PostMessageW(HWND(hwnd), WM_LBUTTONDOWN, MK_LBUTTON, lp_start)) and ok
+    time.sleep(hold_ms / 1000.0)
+    lp_end = lp_start
+    for index in range(1, steps + 1):
+        x = client_x0 + (client_x1 - client_x0) * index // steps
+        y = client_y0 + (client_y1 - client_y0) * index // steps
+        lp_end = _make_lparam(x, y)
+        ok = bool(user32.PostMessageW(HWND(hwnd), WM_MOUSEMOVE, MK_LBUTTON, lp_end)) and ok
+        time.sleep(0.03)
+    ok = bool(user32.PostMessageW(HWND(hwnd), WM_LBUTTONUP, 0, lp_end)) and ok
+    time.sleep(0.02)
+    return ok
+
+
 def post_key(hwnd: int, vk: int) -> bool:
     """Invia un tasto alla finestra via ``PostMessage`` (non tutte le app lo accettano)."""
     ok_down = bool(user32.PostMessageW(HWND(hwnd), WM_KEYDOWN, vk, 0))
