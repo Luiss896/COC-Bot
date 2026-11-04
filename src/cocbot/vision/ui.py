@@ -137,6 +137,28 @@ def find_find_match_button(image: np.ndarray) -> Rect | None:
 
 
 # ---------------------------------------------------------------------------
+# Manutenzione del gioco ("MAINTENANCE BREAK"): banner a strisce gialle in alto.
+# ---------------------------------------------------------------------------
+MAINTENANCE_BANNER_HEIGHT = 0.075  # fascia alta (frazione H) con le strisce gialle
+_MAINTENANCE_MIN_YELLOW = 0.22  # frazione minima della fascia che deve essere gialla
+
+
+def find_maintenance_banner(image: np.ndarray) -> bool:
+    """True se il frame e' la schermata "MAINTENANCE BREAK" (banner a strisce gialle).
+
+    Misure sui frame reali (fascia alta 7,5%): schermata manutenzione 0,33; tutte le altre
+    schermate del dataset <= 0,15 (barre risorse piccole). Nessun input: sola lettura.
+    """
+    if not _valid(image):
+        return False
+    h, w = image.shape[:2]
+    band = max(1, int(h * MAINTENANCE_BANNER_HEIGHT))
+    mask = cv2.inRange(_hsv(image)[:band], YELLOW_LOW, YELLOW_HIGH)
+    yellow_fraction = float(mask.sum() / 255) / max(1, band * w)
+    return yellow_fraction >= _MAINTENANCE_MIN_YELLOW
+
+
+# ---------------------------------------------------------------------------
 # Chiusura menu Build / dialoghi / piazzamento.
 # ---------------------------------------------------------------------------
 def _red_components(image: np.ndarray) -> list[tuple[int, int, int, int, int, int, int]]:
@@ -221,11 +243,14 @@ def _white_fraction_right_of(image: np.ndarray, red_cx: int, red_cy: int) -> flo
 
 
 def find_inactivity_modal(image: np.ndarray) -> tuple[int, int] | None:
-    """Centro del testo "RELOAD GAME" del modal di disconnessione per inattivita', o ``None``.
+    """Centro del pulsante azzurro del modal di disconnessione, o ``None``.
 
+    Riconosce le due varianti osservate su questa versione del gioco:
+    - "Connection lost" con "TRY AGAIN";
+    - "Anyone there?" con "RELOAD GAME".
     Il modal e' un rettangolo molto scuro al centro dello schermo con, in basso a sinistra,
-    la scritta azzurra "RELOAD GAME". La mappa attorno e' luminosa: questo distingue il
-    modal dallo splash screen di caricamento (schermo nero con logo Supercell).
+    la scritta azzurra del pulsante d'azione. La mappa attorno e' luminosa: questo distingue
+    il modal dallo splash screen di caricamento (schermo nero con logo Supercell).
     """
     if not _valid(image):
         return None

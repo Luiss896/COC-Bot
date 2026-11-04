@@ -640,6 +640,9 @@ class UpgradeEngine:
                 last_state = state
             if state is ScreenState.HOME:
                 return True
+            if state is ScreenState.MAINTENANCE:
+                self.log("attesa caricamento: manutenzione del gioco in corso (MAINTENANCE BREAK)")
+                return False
             if state is ScreenState.NETWORK_ERROR:
                 point = ui.find_inactivity_modal(frame)
                 if point is not None:
@@ -649,11 +652,16 @@ class UpgradeEngine:
         return False
 
     def reload_game(self, *, timeout_s: float = 200.0) -> bool:
-        """Gestisce la disconnessione per inattivita': RELOAD GAME + attesa caricamento.
+        """Gestisce la disconnessione: preme il pulsante di retry e attende il caricamento.
 
-        Nota: il reload puo' minimizzare la finestra; ``wait_for_load`` la ripristina.
+        I modal osservati su questa versione sono due varianti, entrambe riconosciute da
+        ``ui.find_inactivity_modal`` (testo del pulsante in azzurro):
+        - "Connection lost" con "TRY AGAIN";
+        - "Anyone there?" con "RELOAD GAME".
+        Il reload puo' minimizzare la finestra; ``wait_for_load`` la ripristina. Se il gioco
+        entra in manutenzione ("MAINTENANCE BREAK") il reload fallisce in fretta, senza input.
         """
-        self.log("disconnessione per inattivita': premo RELOAD GAME e attendo il caricamento")
+        self.log("rete/disconnessione: premo il pulsante di retry (RELOAD GAME / TRY AGAIN)")
         if not self._ensure_window_ready(timeout_s=10.0):
             self.log("reload: finestra di gioco non trovata")
             return False
@@ -817,6 +825,9 @@ class UpgradeEngine:
                 point = ui.find_placement_exit(image)
             elif state is ScreenState.BUILD_MENU:
                 point = ui.find_menu_close(image)
+            elif state is ScreenState.MAINTENANCE:
+                self.log("recover: manutenzione del gioco in corso, nessuna azione possibile")
+                return False
             elif state is ScreenState.NETWORK_ERROR:
                 return self.reload_game()
             else:

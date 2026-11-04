@@ -9,7 +9,9 @@ Stati riconosciuti oggi (verificati su frame reali):
 - ``BUILD_MENU``: menu "Buildings & Heroes" (pannello a destra + X in alto a destra);
 - ``UPGRADE_CONFIRM``: dialogo "Upgrade <X> to Level <N>?" con X centrale;
 - ``PLACEMENT``: modalita' piazzamento nuovo edificio (X rossa + spunta al centro);
-- ``NETWORK_ERROR``: modal di disconnessione per inattivita' ("Anyone there?").
+- ``MAINTENANCE``: schermata "MAINTENANCE BREAK" (banner giallo a strisce: nessuna azione);
+- ``NETWORK_ERROR``: modal di disconnessione ("Connection lost / TRY AGAIN" o
+  "Anyone there? / RELOAD GAME").
 
 Stati pianificati ma non ancora implementati (restano ``UNKNOWN``): anteprima/battaglia,
 popup, negozio, Hero Hall, wall upgrader.
@@ -37,6 +39,8 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.NETWORK_ERROR
     if ui.find_placement_exit(image) is not None:
         return ScreenState.PLACEMENT
+    if ui.find_maintenance_banner(image):
+        return ScreenState.MAINTENANCE
     if _is_build_menu(image):
         return ScreenState.BUILD_MENU
     if ui.find_find_match_button(image) is not None:
@@ -60,7 +64,8 @@ def describe(state: ScreenState) -> str:
         ScreenState.BUILD_MENU: "menu Build (Buildings & Heroes)",
         ScreenState.UPGRADE_CONFIRM: "dialogo conferma upgrade",
         ScreenState.PLACEMENT: "piazzamento nuovo edificio",
-        ScreenState.NETWORK_ERROR: "disconnessione per inattivita' (serve RELOAD GAME)",
+        ScreenState.MAINTENANCE: "manutenzione del gioco (MAINTENANCE BREAK): bot in pausa",
+        ScreenState.NETWORK_ERROR: "disconnessione di rete (TRY AGAIN / RELOAD GAME)",
         ScreenState.UNKNOWN: "stato sconosciuto",
     }
     return descriptions.get(state, state.value)

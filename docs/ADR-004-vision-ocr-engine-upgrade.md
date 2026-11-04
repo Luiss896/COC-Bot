@@ -130,6 +130,24 @@
 - Test: 119 unit test verdi (parser, geometria sintetica, dataset locale, planner/merge, livello
   di destinazione del catalogo, preset A/B mura, canonicalizzazione OCR, anti-falsi-positivi).
 
+### Aggiornamento 4 nov 09:15 — disconnessione reale e MAINTENANCE BREAK (validazione parziale)
+
+- Durante il lavoro di oggi il gioco ha mostrato una **disconnessione reale** con una variante
+  nuova del modal: **"Connection lost" + "TRY AGAIN"** (non solo "Anyone there? / RELOAD GAME").
+  `find_inactivity_modal` riconosce **entrambe**: cerca il testo azzurro del pulsante d'azione nel
+  rettangolo scuro centrale (verificato sul frame reale
+  `dataset/build-win-20261103/connection-lost.png`).
+- **Auto-reload esercitato sul campo:** rilevato `NETWORK_ERROR` → premuto il retry → il gioco ha
+  ricaricato (frame cambiato, nessuna spesa). Il ritorno in home pero' **non e' stato osservato**
+  perche' il server e' entrato in **manutenzione**: dopo il reload compare la schermata
+  **"MAINTENANCE BREAK"** (calendario stagionale).
+- Aggiunto lo stato **`MAINTENANCE`** (`ui.find_maintenance_banner`: frazione gialla della fascia
+  alta; manutenzione 0,33 contro ≤0,15 di tutte le altre schermate reali del dataset) e la
+  gestione prudente: `wait_for_load` fallisce **subito** (senza attendere i 200 s),
+  `recover_home` **non preme nulla** e il bot resta in pausa. Frame reale in
+  `dataset/build-win-20261103/maintenance-break.png`.
+- Test: **132 unit test verdi**, ruff pulito.
+
 ## Limiti noti / da verificare
 
 - L'OCR windowed a volte non legge il tempo (`1d`) o sbaglia nomi (`30M Os`): mitigato con merge
@@ -142,9 +160,14 @@
   **reload del gioco fatto dall'utente mentre i test giravano** (confermato dall'utente); dopo
   il chiarimento i tap/scroll sintetici hanno funzionato per tutte le scansioni ed esecuzioni
   successive. Resta da misurare l'affidabilità su sessioni molto lunghe.
-- **Reload automatico**: implementato ma non esercitato su una disconnessione reale.
+- **Reload automatico**: esercitato su una **disconnessione reale** il 4 nov (variante
+  "Connection lost" → retry → reload eseguito, nessuna spesa); il ritorno completo in home e'
+  stato bloccato dalla **manutenzione server** sopraggiunta nello stesso momento, quindi resta da
+  riconfermare a manutenzione finita.
 - Selettore di riga per "New building": catturato (dataset) ma non implementato nell'engine.
-- Modal inattività: riconosciuto (`NETWORK_ERROR`) e ora gestito con reload automatico.
+- Modal di rete: due varianti riconosciute (`Connection lost/TRY AGAIN`, `Anyone there?/RELOAD GAME`)
+  e gestite con retry; **MANUTENZIONE** (`MAINTENANCE BREAK`) riconosciuta e gestita in pausa
+  sicura (nessun input, attesa).
 - Le righe con sottotitolo (Crafting Station) possono ancora produrre letture parziali; gli
   errori OCR "di poco" sui nomi noti ora vengono recuperati, i nomi illeggibili restano scartati.
 

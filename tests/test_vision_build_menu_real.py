@@ -137,6 +137,32 @@ def test_network_error_modal_real_frame() -> None:
     assert 0.40 < point[1] / h < 0.75
 
 
+def test_connection_lost_modal_real_frame() -> None:
+    """Variante reale "Connection lost / TRY AGAIN": riconosciuta come disconnessione."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    frame = _load("connection-lost.png")
+    assert states.classify(frame) is ScreenState.NETWORK_ERROR
+    point = ui.find_inactivity_modal(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.20 < point[0] / w < 0.60
+    assert 0.40 < point[1] / h < 0.75
+
+
+def test_maintenance_break_real_frame() -> None:
+    """Schermata reale "MAINTENANCE BREAK": riconosciuta; nessun falso positivo sulle altre."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    maintenance = _load("maintenance-break.png")
+    assert ui.find_maintenance_banner(maintenance)
+    assert states.classify(maintenance) is ScreenState.MAINTENANCE
+    for other in ("home-after-panels.png", "build-menu-top.png", "wall-upgrader-panel.png"):
+        assert not ui.find_maintenance_banner(_load(other)), other
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 
