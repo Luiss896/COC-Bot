@@ -160,10 +160,10 @@
   **reload del gioco fatto dall'utente mentre i test giravano** (confermato dall'utente); dopo
   il chiarimento i tap/scroll sintetici hanno funzionato per tutte le scansioni ed esecuzioni
   successive. Resta da misurare l'affidabilità su sessioni molto lunghe.
-- **Reload automatico**: esercitato su una **disconnessione reale** il 4 nov (variante
-  "Connection lost" → retry → reload eseguito, nessuna spesa); il ritorno completo in home e'
-  stato bloccato dalla **manutenzione server** sopraggiunta nello stesso momento, quindi resta da
-  riconfermare a manutenzione finita.
+- **Reload automatico: VALIDATO COMPLETO a runtime** (4 nov, disconnessione reale da inattività):
+  rilevato il modal "Connection lost", premuto il retry, reload in **4,9 s** e ritorno in **home**
+  verificato. Nessuna spesa. (Prima dello stesso giorno il percorso si era fermato sulla schermata
+  di manutenzione server, ora gestita come stato `MAINTENANCE` in pausa sicura.)
 - Selettore di riga per "New building": catturato (dataset) ma non implementato nell'engine.
 - Modal di rete: due varianti riconosciute (`Connection lost/TRY AGAIN`, `Anyone there?/RELOAD GAME`)
   e gestite con retry; **MANUTENZIONE** (`MAINTENANCE BREAK`) riconosciuta e gestita in pausa
