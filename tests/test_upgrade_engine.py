@@ -248,6 +248,120 @@ def test_dry_run_execute_sends_no_action() -> None:
     assert "dry-run" in results[0].reason
 
 
+def test_walls_preset_a_reserves_a_builder() -> None:
+    """Preset A: con mura non max un builder resta libero e gli edifici ne usano uno in meno."""
+    config = Config()  # reserve_builder_for_walls=True di default
+    config.upgrade.max_upgrades_per_cycle = 5
+    rows = [
+        _row("Wall", cost=750_000, currency="gold", scroll_index=0),  # mura disponibili
+        _row("Archer Tower", cost=800_000, currency="gold", scroll_index=1),
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=2),
+        _row("Mortar", cost=200_000, currency="gold", scroll_index=3),
+    ]
+    hud = _hud(gold=50_000_000, builders_available=2, builders_total=5)
+    plan = build_plan(config, _report(rows, hud=hud))
+    # 2 builder liberi - 1 riservato -> un solo upgrade non-mura; le mura non consumano slot
+    assert [item.row.name for item in plan.chosen] == ["wall", "archer tower"]
+    assert any("preset A" in note for note in plan.notes)
+
+
+def test_walls_preset_b_all_builders_when_walls_max() -> None:
+    """Preset B automatico: mura tutte max -> nessun builder riservato."""
+    config = Config()
+    config.upgrade.max_upgrades_per_cycle = 5
+    rows = [
+        _row("Wall", cost=None, level=13, scroll_index=0),  # mura max: nessun costo
+        _row("Archer Tower", cost=800_000, currency="gold", scroll_index=1),
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=2),
+    ]
+    hud = _hud(gold=50_000_000, builders_available=2, builders_total=5)
+    plan = build_plan(config, _report(rows, hud=hud))
+    assert [item.row.name for item in plan.chosen] == ["archer tower", "cannon"]
+    assert any("preset B" in note for note in plan.notes)
+    assert not any("preset A mura" in note for note in plan.notes)
+
+
+def test_walls_max_auto_stop_note() -> None:
+    """Auto-stop: mura max e nient'altro da fare -> note esplicita."""
+    config = Config()
+    rows = [_row("Wall", cost=None, level=13)]
+    plan = build_plan(config, _report(rows))
+    assert plan.chosen == []
+    assert any("auto-stop" in note for note in plan.notes)
+
+
+def test_walls_reserve_can_be_disabled() -> None:
+    """Con reserve_builder_for_walls=false tutti i builder liberi sono utilizzabili."""
+    config = Config()
+    config.walls.reserve_builder_for_walls = False
+    config.upgrade.max_upgrades_per_cycle = 5
+    rows = [
+        _row("Wall", cost=750_000, currency="gold", scroll_index=0),
+        _row("Archer Tower", cost=800_000, currency="gold", scroll_index=1),
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=2),
+    ]
+    hud = _hud(gold=50_000_000, builders_available=2, builders_total=5)
+    plan = build_plan(config, _report(rows, hud=hud))
+    assert [item.row.name for item in plan.chosen] == ["wall", "archer tower", "cannon"]
+
+
+def test_walls_status_helper() -> None:
+    from cocbot.app.upgrade_engine import walls_status
+
+    assert walls_status(_report([])) == "unknown"
+    assert walls_status(_report([_row("Wall", cost=750_000)])) == "available"
+    assert walls_status(_report([_row("Wall", cost=None)])) == "max"
+
+
+def test_canonical_name_recovers_small_ocr_errors() -> None:
+    """Un errore OCR 'di poco' su un nome noto non deve perdere la riga."""
+    from cocbot.app.upgrade_engine import canonical_name
+
+    assert canonical_name("Craftina Station") == "crafting station"
+    assert canonical_name("Craftina Station") != canonical_name("NKKSP")
+    assert categorize("Craftina Station") == "other"
+    # i nomi normali restano invariati
+    assert canonical_name("Air Bomb") == "air bomb"
+    assert canonical_name("Barbarian King") == "barbarian king"
+
+
+def test_canonical_name_does_not_guess_unknown_rows() -> None:
+    """Nomi davvero illeggibili restano senza categoria (nessuna categoria inventata)."""
+    for dirty in ("OTIUN", "NKKSP", "30M Os", "TON", "Cake-A-Pult Hitpoints"):
+        assert categorize(dirty) is None, dirty
+
+
+def test_row_matches_tolerates_dirty_ocr_name() -> None:
+    """La navigazione live ritrova la riga anche se a schermo l'OCR la legge sporca."""
+    from cocbot.app.upgrade_engine import _row_matches
+
+    target = _row("Crafting Station", cost=4_000_000, currency="gold", level=2)
+    page_row = _row("Craftina Station", cost=4_000_000, currency="gold", level=2)
+    assert _row_matches(page_row, target)
+    assert not _row_matches(_row("Craftina Station", cost=3_500_000, currency="gold", level=2), target)
+
+
+def test_merge_rows_merges_dirty_ocr_name() -> None:
+    """Due letture della stessa riga con nome OCR diverso vengono unite (nome canonico)."""
+    from cocbot.app.upgrade_engine import merge_rows
+
+    good = _row("Crafting Station", cost=4_000_000, currency="gold", level=2, time_s=28_800)
+    dirty = _row("Craftina Station", cost=4_000_000, currency="gold", level=2, time_s=28_800)
+    merged = merge_rows([dirty, good])
+    assert len(merged) == 1
+    assert merged[0].name == "crafting station"
+
+
+def test_build_plan_includes_recovered_ocr_row() -> None:
+    """La riga recuperata dal match fuzzy diventa un candidato pianificabile."""
+    config = Config()
+    config.upgrade.max_upgrades_per_cycle = 3
+    rows = [_row("Craftina Station", cost=4_000_000, currency="gold", level=2, time_s=28_800)]
+    plan = build_plan(config, _report(rows, hud=_hud(gold=50_000_000)))
+    assert [item.row.name for item in plan.chosen] == ["craftina station"]
+    assert all(skipped.reason != "nome non riconosciuto (OCR/allowlist)" for skipped in plan.skipped)
+
+
 def test_default_config_is_dry_run() -> None:
     config = Config()
     assert config.upgrade.dry_run is True

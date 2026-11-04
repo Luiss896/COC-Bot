@@ -19,6 +19,7 @@ Sicurezza (GemGuard / regole di progetto):
 """
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import time
@@ -259,15 +260,56 @@ class ExecutionResult:
 def categorize(name: str) -> str | None:
     """Categoria dell'edificio/eroe dal nome normalizzato; ``None`` se non riconosciuto.
 
-    ``None`` e' intenzionale: un nome OCR sbagliato non deve diventare un candidato.
+    ``None`` e' intenzionale: un nome OCR sbagliato non deve diventare un candidato. I soli
+    errori OCR "di poco" sui nomi noti vengono recuperati dal match fuzzy di
+    :func:`canonical_name` (conservativo: solo nomi lunghi, similarita' alta).
+    """
+    return _canonical_building(name)[1]
+
+
+# parole chiave troppo corte producono falsi positivi nel match fuzzy: si escludono
+_FUZZY_MIN_KEYWORD_LEN = 6
+_FUZZY_MIN_RATIO = 0.86
+
+
+def _canonical_building(name: str) -> tuple[str, str | None]:
+    """(nome canonico, categoria) per una riga del catalogo; categoria ``None`` se ignota.
+
+    Prima si cerca la parola chiave esatta (comportamento storico, nessun rischio). Solo se non
+    c'e' match si prova un match fuzzy molto prudente sui nomi noti lunghi: recupera errori tipo
+    ``"Craftina Station"`` -> ``"Crafting Station"`` senza inventare categorie per nomi sporchi.
     """
     normalized = textparse.normalize(name)
     if not normalized:
-        return None
+        return "", None
     for category, keywords in CATEGORY_KEYWORDS:
         if any(keyword in normalized for keyword in keywords):
-            return category
-    return None
+            return normalized, category
+    best: tuple[float, str, str] | None = None
+    for category, keywords in CATEGORY_KEYWORDS:
+        for keyword in keywords:
+            if len(keyword) < _FUZZY_MIN_KEYWORD_LEN:
+                continue
+            ratio = difflib.SequenceMatcher(None, normalized, keyword).ratio()
+            if ratio >= _FUZZY_MIN_RATIO and (best is None or ratio > best[0]):
+                best = (ratio, keyword, category)
+    if best is not None:
+        return best[1], best[2]
+    return normalized, None
+
+
+def canonical_name(name: str) -> str:
+    """Nome canonico per merge e confronti tra letture OCR (fallback: nome normalizzato)."""
+    return _canonical_building(name)[0]
+
+
+def _row_matches(page_row: build_menu.BuildRow, target: build_menu.BuildRow) -> bool:
+    """Stessa riga del piano: nome canonico (tollera OCR sporco), costo e valuta uguali."""
+    return (
+        canonical_name(page_row.name) == canonical_name(target.name)
+        and page_row.cost == target.cost
+        and page_row.currency == target.currency
+    )
 
 
 def priority_list(config: Config) -> tuple[str, ...]:
@@ -298,7 +340,7 @@ def _row_quality(row: build_menu.BuildRow) -> int:
 
 def _same_row(first: build_menu.BuildRow, second: build_menu.BuildRow) -> bool:
     """True se due letture descrivono la stessa riga della lista (anche se parziali)."""
-    if first.name != second.name:
+    if canonical_name(first.name) != canonical_name(second.name):
         return False
     if first.is_new != second.is_new:
         return False
@@ -323,6 +365,7 @@ def _merge_pair(first: build_menu.BuildRow, second: build_menu.BuildRow) -> buil
     other = second if best is first else first
     return replace(
         best,
+        name=canonical_name(best.name),
         level=best.level if best.level is not None else other.level,
         time_s=best.time_s if best.time_s is not None else other.time_s,
         cost=best.cost if best.cost is not None else other.cost,
@@ -343,6 +386,19 @@ def merge_rows(rows: list[build_menu.BuildRow]) -> list[build_menu.BuildRow]:
         else:
             merged.append(row)
     return merged
+
+
+def walls_status(report: ScanReport) -> str:
+    """Stato delle mura dedotto dalla scansione: ``"max"``, ``"available"`` o ``"unknown"``.
+
+    Nel catalogo le mura al massimo compaiono senza costo (badge "MAX"): nessuna riga con
+    costo -> sono max. Se non e' stata letta alcuna riga mura restituisce ``"unknown"`` e il
+    planner resta prudente (preset A: builder riservato).
+    """
+    wall_rows = [row for row in report.rows if categorize(row.name) == "walls"]
+    if not wall_rows:
+        return "unknown"
+    return "available" if any(row.cost is not None for row in wall_rows) else "max"
 
 
 def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
@@ -408,12 +464,35 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
     wall_limit = max(0, int(config.walls.max_wall_batches_per_cycle))
     if not report.hud.has_free_builder:
         return plan
+    # --- preset A/B mura -------------------------------------------------------
+    # Preset A: un builder resta libero e riservato alle mura (il loro upgrade e' istantaneo,
+    # quindi non consuma il builder ma ne serve uno libero al momento del tap).
+    # Preset B (automatico): quando tutte le mura sono max tutti i builder lavorano.
+    walls_enabled = config.upgrade.include_walls and config.walls.mode is not WallMode.OFF
+    walls_state = walls_status(report)
+    walls_max = walls_state == "max"
+    keep_builder_for_walls = bool(
+        walls_enabled
+        and config.walls.reserve_builder_for_walls
+        and not (walls_max and config.walls.switch_to_all_builders_when_walls_max)
+    )
+    free_builders = report.hud.builders_available or 0
+    builder_slots = max(0, free_builders - (1 if keep_builder_for_walls else 0))
+    if keep_builder_for_walls:
+        plan.notes.append(
+            "preset A mura: 1 builder riservato alle mura "
+            f"({builder_slots} disponibili per edifici/eroi)"
+        )
+    elif walls_max and config.walls.reserve_builder_for_walls:
+        plan.notes.append("mura max: preset B, tutti i builder disponibili per gli upgrade")
     # budget cumulativo: ogni upgrade scelto consuma risorse (le mura costano una per volta)
     remaining: dict[str, int | None] = {
         currency: report.hud.amount(currency) for currency in ("gold", "elixir", "dark")
     }
     chosen: list[UpgradeCandidate] = []
     wall_count = 0
+    non_wall_count = 0
+    builder_note_added = False
     for candidate in plan.candidates:
         if len(chosen) >= limit:
             break
@@ -422,6 +501,15 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
             continue
         if candidate.category == "walls" and wall_count >= wall_limit:
             plan.notes.append(f"limite walls.max_wall_batches_per_cycle={wall_limit}: mura oltre il limite")
+            continue
+        if candidate.category != "walls" and non_wall_count >= builder_slots:
+            if not builder_note_added:
+                reserved = free_builders - builder_slots
+                plan.notes.append(
+                    f"builder esauriti per edifici/eroi: {builder_slots} utilizzabili"
+                    + (f", {reserved} riservati alle mura (preset A)" if reserved else "")
+                )
+                builder_note_added = True
             continue
         available = remaining.get(row.currency)
         reserve = int(reserves.get(row.currency, 0))
@@ -434,7 +522,11 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
         remaining[row.currency] = available - row.cost
         if candidate.category == "walls":
             wall_count += 1
+        else:
+            non_wall_count += 1
     plan.chosen = chosen
+    if not chosen and walls_max and config.walls.auto_stop_when_walls_max:
+        plan.notes.append("auto-stop: mura tutte al massimo e nessun altro upgrade disponibile")
     if plan.candidates and not chosen:
         plan.notes.append("nessun candidato scelto: budget/limiti non consentono upgrade")
     return plan
@@ -868,6 +960,9 @@ class UpgradeEngine:
                     raw_rows.append(replace(row, scroll_index=scroll_index))
                 break
         rows = merge_rows(raw_rows)
+        # normalizza i nomi riconosciuti: "Craftina Station" -> "crafting station" (le righe
+        # davvero illeggibili restano col nome normalizzato e verranno scartate dal planner)
+        rows = [replace(row, name=canonical_name(row.name)) for row in rows]
         if not self.close_build_menu():
             notes.append("menu Build non chiuso correttamente dopo la scansione")
         elapsed = time.monotonic() - started
@@ -905,8 +1000,7 @@ class UpgradeEngine:
         previous = self._settle_menu()
         for _page in range(max_pages):
             for page_row in build_menu.read_rows(previous):
-                same_name = _normalize_name(page_row.name) == _normalize_name(target.name)
-                if same_name and page_row.cost == target.cost and page_row.currency == target.currency:
+                if _row_matches(page_row, target):
                     return page_row
             self._wheel(panel, -120)
             current = self._settle_menu(expect_change=True)
@@ -1065,7 +1159,9 @@ class UpgradeEngine:
         # livello ATTUALE e il target e' selected_level+1 (vedi _execute_wall_upgrade).
         expected_level = row.level
         problems: list[str] = []
-        if dialog.name is None or _normalize_name(dialog.name) not in _normalize_name(row.name):
+        if dialog.name is None or _normalize_name(dialog.name) not in _normalize_name(
+            canonical_name(row.name)
+        ):
             problems.append(f"nome dialogo {dialog.name!r} diverso da {row.name!r}")
         if expected_level is not None and dialog.target_level is not None and dialog.target_level != expected_level:
             problems.append(f"livello dialogo {dialog.target_level} diverso da {expected_level}")
@@ -1132,8 +1228,10 @@ __all__ = [
     "UpgradeEngineError",
     "UpgradePlan",
     "build_plan",
+    "canonical_name",
     "categorize",
     "merge_rows",
     "priority_list",
     "save_json",
+    "walls_status",
 ]

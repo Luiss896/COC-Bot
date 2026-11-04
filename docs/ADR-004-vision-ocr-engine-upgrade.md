@@ -80,6 +80,24 @@
   scartati perche' l'OCR li legge preceduti da "-").
 - Scansione: **~56 righe in 21 posizioni in ~84 s** (due run live: 83,7 s e 83,8 s).
 
+### Aggiornamento 4 nov 09:15 — upgrade eroe validato + preset A/B mura + recovery OCR nomi
+
+- **Upgrade eroe validato a runtime** (budget: 44 000 elisir nero, tetto 50 000): riga
+  `Barbarian King [lv 53] · 44 000 dark` → dialogo `Upgrade Barbarian King to Level 53?`
+  verificato (nome/costo) → CONFIRM verde → **dark 198 031 → 154 031** (−44 000 esatti),
+  **builder 5/5 → 4/5**, oro/elisir/gemme invariati; menu chiuso e home verificata.
+- **Preset A/B mura implementato nel planner** (`walls.*`, prima solo config): con mura non max
+  un builder resta libero per le mura (gli edifici/eroi usano `builders_available - 1` slot) e le
+  mura non consumano slot (upgrade istantaneo); quando dalla scansione risultano **max** scatta il
+  preset B (tutti i builder) con nota; `auto_stop_when_walls_max` produce una nota di auto-stop.
+  Nuovo helper `walls_status` (max/available/unknown, prudente su "unknown"), 5 test dedicati.
+- **OCR nomi riga**: canonicalizzazione fuzzy **conservativa** (difflib, solo nomi noti lunghi
+  ≥6 caratteri e similarità ≥0,86) usata da `categorize`, merge, scanner e navigazione live:
+  recupera errori piccoli tipo `Craftina Station` → `Crafting Station`; i nomi davvero illeggibili
+  (`30M Os`, `OTIUN`, `NKKSP`, `TON`) restano senza categoria e vengono scartati. Test dedicati
+  al recupero e all'anti-falsi-positivo.
+- Test: **119 unit test verdi**, ruff pulito.
+
 ### Altri miglioramenti della stessa sessione
 
 - **Animazione dello scroll**: la lista Build si anima per **~1,8 s** dopo ogni evento
@@ -109,17 +127,17 @@
 - HUD in home: oro 7 089 459 · elisir 7 500 945 · dark 195 103 · gemme 1 925 · builder 5/5.
 - Scansione live completa: **62 righe uniche da 21 posizioni di scroll in 33,7 s**; piano dry-run
   con 3 upgrade scelti (BK, AQ, Minion Prince) e 21 righe scartate con motivo; risorse invariate.
-- Test: 109 unit test verdi (parser, geometria sintetica, dataset locale, planner/merge, livello
-  di destinazione del catalogo).
+- Test: 119 unit test verdi (parser, geometria sintetica, dataset locale, planner/merge, livello
+  di destinazione del catalogo, preset A/B mura, canonicalizzazione OCR, anti-falsi-positivi).
 
 ## Limiti noti / da verificare
 
 - L'OCR windowed a volte non legge il tempo (`1d`) o sbaglia nomi (`30M Os`): mitigato con merge
   delle letture, allowlist e skip conservativo; in fullscreen la stessa riga era corretta.
 - **Esecuzione reale del dialogo upgrade standard** (edifici/eroi: riga → dialogo → CONFIRM):
-  **validata a runtime su un edificio** (Air Bomb, 37 500 oro, vedi sopra). Per gli **eroi** lo
-  stesso ramo logico è pronto ma la prima esecuzione reale resta da fare; restano da validare
-  anche le righe con sottotitolo/descrizione (Crafting Station) e il lettore fullscreen live.
+  **validata a runtime sia su un edificio sia su un eroe** (Air Bomb 37 500 oro, Barbarian King
+  44 000 dark, vedi sopra). Restano da validare il lettore fullscreen live e le righe con
+  sottotitolo/descrizione (Crafting Station) nel loro flusso completo.
 - **Input via `PostMessage`**: le intermittenze osservate a metà sessione erano dovute a un
   **reload del gioco fatto dall'utente mentre i test giravano** (confermato dall'utente); dopo
   il chiarimento i tap/scroll sintetici hanno funzionato per tutte le scansioni ed esecuzioni
@@ -127,8 +145,8 @@
 - **Reload automatico**: implementato ma non esercitato su una disconnessione reale.
 - Selettore di riga per "New building": catturato (dataset) ma non implementato nell'engine.
 - Modal inattività: riconosciuto (`NETWORK_ERROR`) e ora gestito con reload automatico.
-- I nomi delle righe con sottotitolo (Crafting Station) o con OCR sporco restano esclusi dal
-  piano (skip conservativo): il catalogo perde alcune righe reali.
+- Le righe con sottotitolo (Crafting Station) possono ancora produrre letture parziali; gli
+  errori OCR "di poco" sui nomi noti ora vengono recuperati, i nomi illeggibili restano scartati.
 
 ## Conseguenze
 
