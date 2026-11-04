@@ -14,6 +14,7 @@ e non automatiche.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -354,13 +355,15 @@ class AttackEngine(UpgradeEngine):
         heroes: bool = True,
         max_taps: int = 90,
     ) -> int:
-        """Deploya i draghi con **sweep a griglia** sul campo, verificando il contatore.
+        """Deploya i draghi provando tessere di erba libera + griglia, in **due passate**.
 
-        Misura live: tap sulla card = selezione; tap su **erba libera** = una truppa deployata;
-        tap su edifici/muri = sola ispezione (nessun effetto). Si provano prima le tessere di
-        erba rilevate e poi una griglia di punti: il contatore della card ("xN") viene
-        confrontato per differenza immagine per capire quando il deploy e' avvenuto; se non
-        cambia per 5 tentativi la card viene riselezionata. Ritorna i tap inviati.
+        Misura live: tap sulla card = selezione (la card si ingrandisce e **resta selezionata**
+        dopo i deploy: non va ritoccata, altrimenti si rischia di deselezionarla); tap su una
+        tessera di erba libera = una truppa deployata; tap su edifici/muri = sola ispezione.
+        Le tessere visibili e deployabili sono poche (le altre sono fuori schermo): la seconda
+        passata, dopo una pausa, riprova le stesse tessere quando le truppe le hanno liberate.
+        Il contatore "xN" della card viene confrontato per differenza immagine.
+        Ritorna i tap di deploy inviati.
         """
         h, w = image.shape[:2]
         candidates = ui.find_deploy_candidates(image, limit=max(dragons, 6))
@@ -378,25 +381,22 @@ class AttackEngine(UpgradeEngine):
         self._tap(card, wait_s=0.5)
         previous = self.grab()
         deployed = 0
-        misses = 0
         attempts = 0
-        for point in points[:max_taps]:
-            self._tap(point, wait_s=0.35)
-            attempts += 1
-            current = self.grab()
-            changed = self._region_diff(previous, current, count_region) > 6.0
-            previous = current
-            if changed:
-                deployed += 1
-                misses = 0
+        for pass_index in range(2):
+            if pass_index == 1:
                 if deployed >= dragons:
                     break
-            else:
-                misses += 1
-                if misses >= 5:
-                    self.log("deploy: contatore invariato, riseleziono la card")
-                    self._tap(card, wait_s=0.3)
-                    misses = 0
+                self.log(f"deploy: seconda passata (deployati finora {deployed})")
+                time.sleep(3.0)
+            for point in points[:max_taps]:
+                self._tap(point, wait_s=0.3)
+                attempts += 1
+                current = self.grab()
+                if self._region_diff(previous, current, count_region) > 6.0:
+                    deployed += 1
+                    if deployed >= dragons:
+                        break
+                previous = current
         if heroes:
             for label, fraction in (
                 ("arciere", ui.BATTLE_QUEEN_CARD),

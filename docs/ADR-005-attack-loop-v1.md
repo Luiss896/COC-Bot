@@ -75,21 +75,34 @@ skip) devono essere esplicite e tracciate.
   rilevato per differenza immagine. Prossimo passo: **sweep a griglia** di tap sul campo (i tap fuori
   bersaglio ispezionano soltanto) con rilevamento del contatore per diff.
 - **Costi e sicurezza**: 11 ricerche base × 1 100 oro = **12 100 oro** (HUD 8 687 509 → 8 675 409);
-  **gemme sempre 1 925 (mai spese)**; nessuna chiusura del gioco durante le battaglie; bottino
-  dell'account invariato (raid con danno < 50% = sconfitta, 0 bottino).
+  **gemme sempre 1 925 (mai spese)**; nessuna chiusura del gioco durante le battaglie.
 - **Nota HUD**: la lettura subito dopo "Return Home" puo' capitare su un frame di transizione e
   dare valori sbagliati (visto una volta: riletta a schermo stabile → valori corretti).
 
+### Aggiornamento 11:05 — deploy a due passate e primo raid **profittevole**
+
+- **Due passate**: dopo la selezione (che **resta attiva**, non va ritoccata la card: un secondo tap
+  rischia di deselezionarla) si prova erba rilevata + griglia; se restano truppe si attende 3 s e si
+  ripassano le stesse tessere (le truppe liberano le celle). Risultato live: **6 draghi deployati**
+  (contro 4 del giro singolo), contatore card x13→x7 coerente con "Troops expended x6".
+- **Battaglie e bottino (live)**: con 4 draghi → 9% danno, **bottino incassato 126 794 oro /
+  402 741 elisir**; con 6 draghi → 14% danno, **112 000 oro / 58 510 elisir / 154 dark**.
+  Le ricerche costano 1 100 oro → i raid sono **netti positivi** in risorse; gemme sempre 1 925.
+- **Limite attuale**: restano da schierare ~7 draghi perché in un solo inquadramento le tessere
+  deployabili visibili sono poche (deploy zone attorno al villaggio, in parte fuori schermo).
+  Prossimo passo: **pannare la camera** prima del deploy per esporre più zona deployabile, oppure
+  aspettare in due/tre passate con pause più lunghe. Eroi: tentati, non ancora deployati.
+- Frame risultati con bottino salvato in `dataset/build-win-20261103/battle-results-loot-window.png`.
+
 ## Limiti noti / da validare
 
-- **Deploy**: funziona sulle tessere di erba libera (validato: 4 draghi, 11% danno) ma il
-  rilevamento delle tessere non e' ancora affidabile su tutte le basi → prossimo step sweep a
-  griglia + contatore per diff. Eroi/spell: tentati ma non ancora deployati con successo.
-- **"Next"** (skip reale) non e' stato premuto live: ogni skip costa ~1100 oro, da autorizzare
-  nel piano di spesa del loop.
+- **Deploy**: funziona (6 draghi, 14% danno, bottino incassato) ma restano truppe non schierate per
+  le poche tessere visibili: serve **camera pan** e/o passate multiple piu' lunghe. Eroi/spell:
+  tentati, non ancora deployati.
+- **"Next"** (skip reale) non e' stato premuto live: ogni skip costa ~1100 oro.
 - `SkipSession` e policy loot sono pronte ma non collegate a un loop skip+attack completo.
-- I raid eseguiti sono finiti in **Defeat** (nessuna stella): la strategia dragon spam va tarata
-  (punti di deploy piu' efficaci, uso eroi/spell, early-exit).
+- I raid eseguiti sono finiti in **Defeat** (nessuna stella, ma con bottino): strategia da tarare
+  (camera pan, eroi/spell, early-exit).
 
 ## Conseguenze
 
