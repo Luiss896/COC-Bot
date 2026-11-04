@@ -402,8 +402,12 @@ def cmd_upgrade_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_upgrade_run(args: argparse.Namespace) -> int:
-    """Pianifica ed esegue gli upgrade. Senza ``--execute`` e' un dry-run."""
-    from cocbot.app.upgrade_engine import UpgradeEngineError, save_json
+    """Pianifica ed esegue gli upgrade. Senza ``--execute`` e' un dry-run.
+
+    I tetti opzionali ``--max-gold/--max-elixir/--max-dark`` (cumulativi per il ciclo) e
+    ``--max-upgrades`` limitano la spesa: utile per liberare capacità quando le risorse sono al cap.
+    """
+    from cocbot.app.upgrade_engine import UpgradeEngineError, filter_plan_by_budget, save_json
     from cocbot.vision.ocr import OcrUnavailable
 
     config, engine = _load_engine(args.config)
@@ -411,6 +415,18 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
     try:
         report = engine.scan(max_scrolls=args.max_scrolls)
         plan = engine.plan(report, only=getattr(args, "only", None))
+        budgets = {
+            currency: value
+            for currency, value in (
+                ("gold", getattr(args, "max_gold", None)),
+                ("elixir", getattr(args, "max_elixir", None)),
+                ("dark", getattr(args, "max_dark", None)),
+            )
+            if value is not None
+        }
+        max_upgrades = getattr(args, "max_upgrades", None)
+        if budgets or max_upgrades is not None:
+            plan = filter_plan_by_budget(plan, budgets=budgets, max_upgrades=max_upgrades)
         _print_scan_summary(report, plan)
         results = engine.execute(plan, dry_run=dry_run)
         print(f"\n== ESECUZIONE ({'dry-run' if dry_run else 'REALE'}) ==")
@@ -717,6 +733,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute",
         action="store_true",
         help="esegue davvero gli upgrade (preme CONFIRM: spende risorse). Default: dry-run.",
+    )
+    upgrade_run.add_argument(
+        "--max-gold", type=int, default=None, help="tetto cumulativo di oro speso nel ciclo"
+    )
+    upgrade_run.add_argument(
+        "--max-elixir", type=int, default=None, help="tetto cumulativo di elisir speso nel ciclo"
+    )
+    upgrade_run.add_argument(
+        "--max-dark", type=int, default=None, help="tetto cumulativo di dark speso nel ciclo"
+    )
+    upgrade_run.add_argument(
+        "--max-upgrades", type=int, default=None, help="numero massimo di upgrade nel ciclo"
     )
     upgrade_run.set_defaults(func=cmd_upgrade_run)
 
