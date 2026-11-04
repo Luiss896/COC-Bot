@@ -546,6 +546,8 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             print(f"  capacità residua: oro={capacity['gold']} elisir={capacity['elixir']}")
         if report.get("skip_limit_reason"):
             print(f"  limite skip: {report['skip_limit_reason']}")
+        if report.get("dark_fallback"):
+            print("  fallback attivo: attacco 'solo dark' (oro/elisir limitati dalla capacità)")
         for index, loot in enumerate(report["loots"], start=1):
             print(
                 f"  loot {index}: oro={loot['gold']} elisir={loot['elixir']} "

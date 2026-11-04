@@ -6,10 +6,70 @@ import json
 from cocbot.app.attack_engine import (
     LootPreview,
     apply_capacity,
+    dark_fallback_decision,
     save_attack_report,
     usable_capacity,
 )
 from cocbot.app.upgrade_engine import HudRead
+
+_THRESHOLDS = {"gold_min": 350_000, "elixir_min": 350_000, "dark_min": 2_000}
+
+
+def test_dark_fallback_when_capacity_limited() -> None:
+    """Storage quasi piene: oro/elisir non incassabili, ma il dark basta → attacca."""
+    loot = LootPreview(gold=800_000, elixir=800_000, dark=9_000)
+    decision = dark_fallback_decision(
+        loot,
+        usable_gold=50_000,
+        usable_elixir=45_000,
+        thresholds=_THRESHOLDS,
+        weights={"gold": 1.0, "elixir": 1.0, "dark": 100.0},
+    )
+    assert decision is not None
+    assert decision.should_attack
+    assert decision.dark == 9_000
+    assert "solo dark" in decision.reason
+    assert decision.score == 900_000
+
+
+def test_dark_fallback_not_applied_when_dark_low() -> None:
+    loot = LootPreview(gold=800_000, elixir=800_000, dark=500)
+    assert (
+        dark_fallback_decision(
+            loot,
+            usable_gold=50_000,
+            usable_elixir=45_000,
+            thresholds=_THRESHOLDS,
+        )
+        is None
+    )
+
+
+def test_dark_fallback_not_applied_with_capacity() -> None:
+    """Con capacita' sufficiente la policy normale decide: niente fallback."""
+    loot = LootPreview(gold=800_000, elixir=800_000, dark=9_000)
+    assert (
+        dark_fallback_decision(
+            loot,
+            usable_gold=5_000_000,
+            usable_elixir=5_000_000,
+            thresholds=_THRESHOLDS,
+        )
+        is None
+    )
+
+
+def test_dark_fallback_not_applied_unreadable_loot() -> None:
+    loot = LootPreview(gold=None, elixir=None, dark=9_000)
+    assert (
+        dark_fallback_decision(
+            loot,
+            usable_gold=0,
+            usable_elixir=0,
+            thresholds=_THRESHOLDS,
+        )
+        is None
+    )
 
 
 def _hud(**kwargs) -> HudRead:

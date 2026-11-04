@@ -133,6 +133,23 @@ Prossimi passi: **early-exit** in battaglia, priorità dark a storage piene, tel
 - **Telemetria**: ogni raid salva un JSON in `out/attack/attack-<timestamp>.json` (gitignored) con
   ricerche/skip, bottini, capacità, esito OCR, HUD prima/dopo e percorso del report.
 
+### Aggiornamento 12:11 — fallback **"solo dark"** e **skip in-loop** validati live
+
+- Implementato `dark_fallback_decision` (`attack.attack_for_dark_when_full`): quando oro/elisir sono
+  limitati dalla capacità residua ma il **dark elixir** della base raggiunge `loot.thresholds.dark_min`,
+  il raid è autorizzato comunque (il dark non è limitato dalle storage piene). La decisione normale
+  resta prioritaria; il fallback si applica solo se questa fallirebbe per capacità.
+- **Live (4 nov 12:11)**, HUD oro/elisir 9 949 872/9 954 857 (capacità residua 50 128/45 143):
+  1. ricerca base 1 → dark 152 (< 2 000) → **skip automatico con "Next"** (~1 100 oro); questa è la
+     **prima validazione live dello skip dentro `run_attack`** (SkipSession + next_base);
+  2. base 2 → dark **12 868** → decisione normale fallisce, **fallback "solo dark" attivo** →
+     attacco con 13 draghi + 2 eroi + 5 spell;
+  3. esito **defeat 36%**, bottino battaglia 345 142 oro / 298 844 elisir / 6 928 dark (OCR);
+     HUD: oro/elisir tornati al **cap 10 000 000**, **dark 183 153 → 190 081 (+6 928)**, gemme 1 925.
+- Costo: 2 ricerche × 1 100 = **2 200 oro**; il guadagno utile del raid è il dark (+6 928), mentre
+  oro/elisir in eccesso rispetto alla capacità sono stati persi al cap (comportamento atteso e
+  documentato). 4 test dedicati al fallback (165 totali).
+
 ### Aggiornamento 12:03 — **early-exit in battaglia** validato live
 
 - Implementato `run_attack(early_exit_damage=N)`: durante la battaglia legge "Overall Damage"

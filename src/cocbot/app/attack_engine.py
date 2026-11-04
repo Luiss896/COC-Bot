@@ -173,6 +173,49 @@ def save_attack_report(report: dict, out_dir: str | Path = "out/attack") -> Path
     return path
 
 
+def dark_fallback_decision(
+    loot: LootPreview,
+    *,
+    usable_gold: int | None,
+    usable_elixir: int | None,
+    thresholds: dict[str, int] | None = None,
+    weights: dict[str, float] | None = None,
+) -> LootDecision | None:
+    """Attacco "solo dark" quando oro/elisir non sono incassabili (storage piene).
+
+    Se la capacita' residua rende oro/elisir sotto le soglie ma il **dark elixir** della base
+    raggiunge ``dark_min``, autorizza comunque il raid (il dark non e' limitato dalle storage
+    piene). Funzione pura; ``None`` se il fallback non si applica.
+    """
+    thresholds = thresholds or {}
+    weights = weights or DEFAULT_WEIGHTS
+    effective = apply_capacity(loot, usable_gold=usable_gold, usable_elixir=usable_elixir)
+    if effective.gold is None or effective.elixir is None:
+        return None
+    gold_min = int(thresholds.get("gold_min", 0))
+    elixir_min = int(thresholds.get("elixir_min", 0))
+    dark_min = int(thresholds.get("dark_min", 0))
+    # si applica solo se oro/elisir sono stati limitati dalla capacita'
+    if effective.gold >= gold_min and effective.elixir >= elixir_min:
+        return None
+    dark = loot.dark
+    if dark is None or dark < dark_min:
+        return None
+    score = dark * float(weights.get("dark", 100.0))
+    reason = (
+        f"solo dark: {dark} >= {dark_min} (oro/elisir limitati dalla capacita': "
+        f"{effective.gold}/{effective.elixir})"
+    )
+    return LootDecision(
+        gold=effective.gold,
+        elixir=effective.elixir,
+        dark=dark,
+        score=score,
+        should_attack=True,
+        reason=reason,
+    )
+
+
 def evaluate_loot_from_config(loot, preview: LootPreview) -> LootDecision:
     """Applica la policy loot della config (``loot.thresholds`` + ``loot.weights``)."""
     thresholds = {
@@ -471,6 +514,7 @@ class AttackEngine(UpgradeEngine):
             "usable_capacity": None,
             "attacked": False,
             "early_exit": False,
+            "dark_fallback": False,
             "result": None,
             "action": None,
             "hud_before": None,
@@ -531,6 +575,21 @@ class AttackEngine(UpgradeEngine):
                     }
                 )
                 decision = evaluate_loot_from_config(self.config.loot, effective)
+                if not decision.should_attack and attack_config.attack_for_dark_when_full:
+                    fallback = dark_fallback_decision(
+                        loot,
+                        usable_gold=usable_gold,
+                        usable_elixir=usable_elixir,
+                        thresholds={
+                            "gold_min": self.config.loot.thresholds.gold_min,
+                            "elixir_min": self.config.loot.thresholds.elixir_min,
+                            "dark_min": self.config.loot.thresholds.dark_min,
+                        },
+                        weights=self.config.loot.weights,
+                    )
+                    if fallback is not None:
+                        decision = fallback
+                        report["dark_fallback"] = True
                 report["decision"] = decision.reason
                 if decision.should_attack:
                     break

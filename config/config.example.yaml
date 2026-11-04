@@ -92,6 +92,8 @@ attack:
   respect_storage_caps: true
   storage_cap_gold: 10000000
   storage_cap_elixir: 10000000
+  # con oro/elisir al cap (bottino non incassabile) attacca comunque se il dark basta
+  attack_for_dark_when_full: true
 
 loot:
   thresholds:
