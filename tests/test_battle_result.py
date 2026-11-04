@@ -76,6 +76,27 @@ def test_parse_result_items_defeat_two_loot_rows() -> None:
     assert result.notes == ()
 
 
+def test_parse_result_items_without_you_got_label_fallback() -> None:
+    """Alcuni risultati (vittoria) non mostrano 'You got:': gli importi si stimano per posizione."""
+    from cocbot.vision.battle_result import parse_result_items
+
+    items = [
+        _item("Total damage:", 121),
+        _item("84%", 157),
+        _item("Victory", 283),
+        _item("59 023", 448),
+        _item("53 271", 513),
+        _item("1 296", 577),
+        _item("Troops expended:", 639),
+        _item("x13", 671),
+    ]
+    result = parse_result_items(items, frame_height=975)
+    assert result.outcome == "victory"
+    assert result.damage_pct == 84
+    assert (result.loot_gold, result.loot_elixir, result.loot_dark) == (59_023, 53_271, 1_296)
+    assert any("assente" in note for note in result.notes)
+
+
 def test_parse_result_items_garbage_returns_none() -> None:
     from cocbot.vision.battle_result import parse_result_items
 
@@ -107,6 +128,16 @@ def test_read_result_defeat_real_frame() -> None:
     assert result.damage_pct == 14
     assert (result.loot_gold, result.loot_elixir, result.loot_dark) == (112_000, 58_510, 154)
     assert result.troops_expended == 6
+
+
+@build_dataset
+def test_read_overall_damage_real_battle_frame() -> None:
+    from cocbot.vision.battle_result import read_overall_damage
+
+    frame = _load_build("battle-phase-window.png")
+    assert read_overall_damage(frame) == 0
+    # su un frame non di battaglia non deve leggere una percentuale di danno
+    assert read_overall_damage(_load_build("home-after-panels.png")) is None
 
 
 @build_dataset

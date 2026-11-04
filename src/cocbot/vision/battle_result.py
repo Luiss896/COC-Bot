@@ -20,6 +20,8 @@ from cocbot.vision import textparse
 
 # regione OCR della schermata risultati (frazioni del frame): banner, danno, bottino, truppe
 RESULT_OCR_REGION = (0.22, 0.08, 0.56, 0.64)  # (x, y, w, h)
+# regione OCR del "Overall Damage: N%" in basso a destra durante la battaglia
+BATTLE_DAMAGE_REGION = (0.86, 0.72, 0.13, 0.10)  # (x, y, w, h)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +77,21 @@ def parse_result_items(items, *, frame_height: int | None = None) -> BattleResul
         if len(loot) < 2:
             notes.append(f"bottino: letti {len(loot)} importi su 3")
     else:
-        notes.append("etichetta 'You got:' non trovata")
+        # fallback: alcuni risultati (es. vittoria) non mostrano l'etichetta "You got:":
+        # si cercano gli importi nella fascia centrale, sotto il danno e sopra le truppe.
+        notes.append("etichetta 'You got:' assente: importi stimati per posizione")
+        if frame_height:
+            low = 0.33 * frame_height
+            high = 0.72 * frame_height
+            amounts = []
+            for item in items:
+                if not (low < item.cy < high):
+                    continue
+                amount = textparse.parse_amount(item.text)
+                if amount is not None and amount >= 1_000:
+                    amounts.append((item.cy, amount))
+            amounts.sort()
+            loot = [amount for _cy, amount in amounts][:3]
 
     # truppe: somma dei contatori "xN" sotto "Troops expended:"
     troops_label = next(
@@ -128,10 +144,30 @@ def read_result(image: np.ndarray, *, texts=None) -> BattleResult:
     return parse_result_items(items, frame_height=int(image.shape[0]))
 
 
+def read_overall_damage(image: np.ndarray) -> int | None:
+    """Legge "Overall Damage: N%" mostrato in basso a destra durante la battaglia.
+
+    OCR su regione piccola (~0,15 s); ``None`` se la percentuale non e' leggibile (es. frame
+    non di battaglia). Usata per l'early-exit quando il danno obiettivo e' raggiunto.
+    """
+    h, w = image.shape[:2]
+    x, y, width, height = BATTLE_DAMAGE_REGION
+    x0, y0 = int(x * w), int(y * h)
+    x1, y1 = int((x + width) * w), int((y + height) * h)
+    items = ocr_module.read_texts(image[y0:y1, x0:x1], offset=(x0, y0))
+    for item in items:
+        percent = textparse.parse_percent(item.text)
+        if percent is not None:
+            return percent
+    return None
+
+
 __all__ = [
+    "BATTLE_DAMAGE_REGION",
     "RESULT_OCR_REGION",
     "BattleResult",
     "parse_result_items",
+    "read_overall_damage",
     "read_result",
     "result_region",
 ]

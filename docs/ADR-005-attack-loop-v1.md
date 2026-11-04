@@ -133,6 +133,18 @@ Prossimi passi: **early-exit** in battaglia, priorità dark a storage piene, tel
 - **Telemetria**: ogni raid salva un JSON in `out/attack/attack-<timestamp>.json` (gitignored) con
   ricerche/skip, bottini, capacità, esito OCR, HUD prima/dopo e percorso del report.
 
+### Aggiornamento 12:03 — **early-exit in battaglia** validato live
+
+- Implementato `run_attack(early_exit_damage=N)`: durante la battaglia legge "Overall Damage"
+  (regione in basso a destra, OCR piccolo ~0,15 s) e quando il danno raggiunge la soglia preme
+  **"End Battle"** (`end_battle_early`: se compare un dialogo conferma col CONFIRM verde), poi
+  attende i risultati e torna in home. CLI: `attack-run --early-exit-damage 40`.
+- **Live (4 nov 12:03)**: raid con 13 draghi + 2 eroi + 5 spell; early-exit scattato a **41%**
+  (soglia 40); risultati raggiunti e letti (Victory, danno finale 84%) e Return Home; HUD
+  **+549 872 oro / +521 730 elisir / +8 496 dark**; gemme 1 925. La lettura del bottino dal frame ha
+  però restituito `None`: il frame vittoria non mostrava l'etichetta "You got:" → aggiunto al parser
+  un **fallback per posizione** (importi nella fascia centrale, ≥1000, con nota) + test.
+
 ### Aggiornamento 11:45 — skip reale ("Next") e spell validati live; raid **VITTORIA 79%**
 
 - **"Next" validato live**: anteprima A (loot 300 014 / 819 462 / 562) → "Next" (~1 100 oro) →

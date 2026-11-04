@@ -534,10 +534,13 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             heroes=not args.no_heroes,
             spells=max(0, args.spells),
             respect_storage_caps=not args.ignore_caps,
+            early_exit_damage=max(0, args.early_exit_damage),
         )
         print("\n== ATTACK RUN ==")
         print(f"  dry_run={report['dry_run']} azione={report['action']}")
         print(f"  ricerche={report['searches']} skip={report['skips']}")
+        if report.get("early_exit"):
+            print(f"  early-exit a danno {report.get('early_exit_damage_pct')}%")
         capacity = report.get("usable_capacity")
         if capacity:
             print(f"  capacità residua: oro={capacity['gold']} elisir={capacity['elixir']}")
@@ -705,6 +708,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--ignore-caps",
         action="store_true",
         help="ignora il cap delle storage (default: salta il raid se oro+elisir sono pieni)",
+    )
+    attack_run.add_argument(
+        "--early-exit-damage",
+        type=int,
+        default=0,
+        help="se >0: durante la battaglia esce quando 'Overall Damage' raggiunge questa %%",
     )
     attack_run.set_defaults(func=cmd_attack_run)
 

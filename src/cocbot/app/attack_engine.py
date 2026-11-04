@@ -390,6 +390,36 @@ class AttackEngine(UpgradeEngine):
             self.log("read_battle_result: non sono nella schermata risultati")
         return battle_result.read_result(image)
 
+    def read_overall_damage(self) -> int | None:
+        """Legge la percentuale "Overall Damage" mostrata in basso a destra in battaglia."""
+        return battle_result.read_overall_damage(self.grab())
+
+    def end_battle_early(self, *, confirm_timeout_s: float = 4.0) -> bool:
+        """Durante la battaglia: preme "End Battle" (chiude con il danno attuale → risultati).
+
+        Se compare un dialogo di conferma preme il bottone verde CONFIRM. Ritorna True se si
+        raggiunge la schermata risultati (o la home), False se non e' riuscito.
+        """
+        image = self.grab()
+        button = ui.find_end_battle_button(image)
+        if button is None:
+            self.log("end_battle_early: pulsante End Battle non trovato")
+            return False
+        self.log("end_battle_early: premo 'End Battle' durante la battaglia")
+        self._tap(ui.center(button), wait_s=1.2)
+        deadline = time.monotonic() + confirm_timeout_s
+        while time.monotonic() < deadline:
+            frame = self.grab()
+            state = states.classify(frame)
+            if state in (ScreenState.BATTLE_END, ScreenState.HOME):
+                return True
+            confirm = ui.find_confirm_button(frame)
+            if confirm is not None:
+                self.log("end_battle_early: confermo la fine battaglia")
+                self._tap(ui.center(confirm), wait_s=1.2)
+            time.sleep(0.5)
+        return self._wait_state(ScreenState.BATTLE_END, timeout_s=15.0) is not None
+
     def _hud_text(self) -> str | None:
         try:
             return str(self.read_hud(self.grab()))
@@ -414,6 +444,7 @@ class AttackEngine(UpgradeEngine):
         heroes: bool = True,
         spells: int = 0,
         respect_storage_caps: bool = True,
+        early_exit_damage: int = 0,
         battle_end_timeout_s: float = 240.0,
     ) -> dict:
         """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
@@ -426,6 +457,8 @@ class AttackEngine(UpgradeEngine):
         ``respect_storage_caps``: legge l'HUD prima di spendere e salta il raid se oro+elisir sono
         al cap (``attack.storage_cap_gold``/``storage_cap_elixir``); il bottino atteso viene ridotto
         alla capacita' residua per la decisione.
+        ``early_exit_damage``: se >0, durante la battaglia legge "Overall Damage" e quando il danno
+        raggiunge la soglia preme "End Battle" per chiudere subito (risparmia tempo); 0 = disattivo.
         Ritorna un report con ricerche/skip, bottini letti, decisione, esito e HUD prima/dopo.
         """
         report: dict = {
@@ -437,6 +470,7 @@ class AttackEngine(UpgradeEngine):
             "decision": None,
             "usable_capacity": None,
             "attacked": False,
+            "early_exit": False,
             "result": None,
             "action": None,
             "hud_before": None,
@@ -540,7 +574,35 @@ class AttackEngine(UpgradeEngine):
             )
             if spells > 0:
                 report["spell_taps"] = self.deploy_spells(self.grab(), count=spells)
-            end_frame = self._wait_state(ScreenState.BATTLE_END, timeout_s=battle_end_timeout_s)
+            end_frame = None
+            started = time.monotonic()
+            early_exit_fired = False
+            while time.monotonic() - started < battle_end_timeout_s:
+                try:
+                    image = self.grab()
+                except AttackEngineError as exc:
+                    self.log(f"battaglia: grab fallito: {exc}")
+                    time.sleep(1.0)
+                    continue
+                state = states.classify(image)
+                if state is ScreenState.BATTLE_END:
+                    end_frame = image
+                    break
+                if state is ScreenState.HOME:
+                    report["action"] = "battle_aborted_home"
+                    return self._finish_report(report)
+                if early_exit_damage > 0 and state is ScreenState.BATTLE and not early_exit_fired:
+                    percent = battle_result.read_overall_damage(image)
+                    if percent is not None and percent >= early_exit_damage:
+                        self.log(
+                            f"early-exit: danno {percent}% >= obiettivo {early_exit_damage}%"
+                        )
+                        report["early_exit_damage_pct"] = percent
+                        early_exit_fired = True
+                        self.end_battle_early()
+                        continue
+                time.sleep(4.0)
+            report["early_exit"] = early_exit_fired
             if end_frame is None:
                 report["action"] = "battle_end_timeout"
                 return self._finish_report(report)
