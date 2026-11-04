@@ -410,7 +410,7 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
     dry_run = not getattr(args, "execute", False)
     try:
         report = engine.scan(max_scrolls=args.max_scrolls)
-        plan = engine.plan(report)
+        plan = engine.plan(report, only=getattr(args, "only", None))
         _print_scan_summary(report, plan)
         results = engine.execute(plan, dry_run=dry_run)
         print(f"\n== ESECUZIONE ({'dry-run' if dry_run else 'REALE'}) ==")
@@ -533,14 +533,22 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             dragons=max(1, args.dragons),
             heroes=not args.no_heroes,
             spells=max(0, args.spells),
+            respect_storage_caps=not args.ignore_caps,
         )
         print("\n== ATTACK RUN ==")
         print(f"  dry_run={report['dry_run']} azione={report['action']}")
         print(f"  ricerche={report['searches']} skip={report['skips']}")
+        capacity = report.get("usable_capacity")
+        if capacity:
+            print(f"  capacità residua: oro={capacity['gold']} elisir={capacity['elixir']}")
         if report.get("skip_limit_reason"):
             print(f"  limite skip: {report['skip_limit_reason']}")
         for index, loot in enumerate(report["loots"], start=1):
-            print(f"  loot {index}: oro={loot['gold']} elisir={loot['elixir']} dark={loot['dark']}")
+            print(
+                f"  loot {index}: oro={loot['gold']} elisir={loot['elixir']} "
+                f"dark={loot['dark']} (incassabile {loot.get('incassabile_gold')}/"
+                f"{loot.get('incassabile_elixir')})"
+            )
         if report.get("decision"):
             print(f"  decisione: {report['decision']}")
         if report.get("deploy_taps") is not None:
@@ -560,6 +568,8 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             print(f"  HUD prima: {report['hud_before']}")
         if report.get("hud_after"):
             print(f"  HUD dopo:  {report['hud_after']}")
+        if report.get("report_path"):
+            print(f"  report telemetria: {report['report_path']}")
         return 0
     except AttackEngineError as exc:
         print(f"ERRORE engine: {exc}")
@@ -642,6 +652,11 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade_run.add_argument("--max-scrolls", type=int, default=None)
     upgrade_run.add_argument("--out", default=None)
     upgrade_run.add_argument(
+        "--only",
+        default=None,
+        help="considera solo la riga con questo nome (match fuzzy); utile per target espliciti",
+    )
+    upgrade_run.add_argument(
         "--execute",
         action="store_true",
         help="esegue davvero gli upgrade (preme CONFIRM: spende risorse). Default: dry-run.",
@@ -686,6 +701,11 @@ def build_parser() -> argparse.ArgumentParser:
     attack_run.add_argument("--dragons", type=int, default=13)
     attack_run.add_argument("--no-heroes", action="store_true")
     attack_run.add_argument("--spells", type=int, default=0, help="spell da lanciare dopo il deploy")
+    attack_run.add_argument(
+        "--ignore-caps",
+        action="store_true",
+        help="ignora il cap delle storage (default: salta il raid se oro+elisir sono pieni)",
+    )
     attack_run.set_defaults(func=cmd_attack_run)
 
     return parser

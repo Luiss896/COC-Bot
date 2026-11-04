@@ -14,8 +14,10 @@ e non automatiche.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -128,6 +130,47 @@ def parse_loot_items(items) -> LootPreview:
         notes.append(f"loot: letti {len(values)} valori su 3")
     gold, elixir, dark = (values + [None, None, None])[:3]
     return LootPreview(gold=gold, elixir=elixir, dark=dark, notes=tuple(notes))
+
+
+def usable_capacity(
+    hud,
+    *,
+    cap_gold: int,
+    cap_elixir: int,
+) -> tuple[int | None, int | None]:
+    """Capacita' residua delle storage (oro, elisir) letta dall'HUD; ``None`` = non nota.
+
+    Con storage piene il bottino in eccesso va perso: il loop attacco usa questi valori per
+    decidere se valga la pena spendere una ricerca (funzione pura).
+    """
+    gold = None if hud.gold is None else max(0, cap_gold - hud.gold)
+    elixir = None if hud.elixir is None else max(0, cap_elixir - hud.elixir)
+    return gold, elixir
+
+
+def apply_capacity(
+    loot: LootPreview,
+    *,
+    usable_gold: int | None,
+    usable_elixir: int | None,
+) -> LootPreview:
+    """Riduce il bottino atteso alla capacita' residua (evita raid che non incassano)."""
+    gold = loot.gold
+    if gold is not None and usable_gold is not None:
+        gold = min(gold, usable_gold)
+    elixir = loot.elixir
+    if elixir is not None and usable_elixir is not None:
+        elixir = min(elixir, usable_elixir)
+    return LootPreview(gold=gold, elixir=elixir, dark=loot.dark, notes=loot.notes)
+
+
+def save_attack_report(report: dict, out_dir: str | Path = "out/attack") -> Path:
+    """Salva il report di un raid in JSON (telemetria) e ritorna il percorso."""
+    directory = Path(out_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"attack-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 def evaluate_loot_from_config(loot, preview: LootPreview) -> LootDecision:
@@ -355,6 +398,11 @@ class AttackEngine(UpgradeEngine):
 
     def _finish_report(self, report: dict) -> dict:
         report["hud_after"] = self._hud_text()
+        try:
+            report["report_path"] = str(save_attack_report(report))
+        except OSError as exc:
+            report["report_path"] = None
+            self.log(f"telemetria: salvataggio report fallito: {exc}")
         return report
 
     def run_attack(
@@ -365,6 +413,7 @@ class AttackEngine(UpgradeEngine):
         dragons: int = 13,
         heroes: bool = True,
         spells: int = 0,
+        respect_storage_caps: bool = True,
         battle_end_timeout_s: float = 240.0,
     ) -> dict:
         """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
@@ -374,6 +423,9 @@ class AttackEngine(UpgradeEngine):
         numero totale di ricerche (= tetto di spesa ``max_searches * 1100`` oro circa); in piu'
         ``SkipSession`` applica i limiti di config ``loot.max_skip_per_attack`` / ``skip_timeout_s``.
         ``spells``: quante spell lanciare dopo draghi/eroi (0 = nessuna).
+        ``respect_storage_caps``: legge l'HUD prima di spendere e salta il raid se oro+elisir sono
+        al cap (``attack.storage_cap_gold``/``storage_cap_elixir``); il bottino atteso viene ridotto
+        alla capacita' residua per la decisione.
         Ritorna un report con ricerche/skip, bottini letti, decisione, esito e HUD prima/dopo.
         """
         report: dict = {
@@ -383,11 +435,13 @@ class AttackEngine(UpgradeEngine):
             "skip_limit_reason": None,
             "loots": [],
             "decision": None,
+            "usable_capacity": None,
             "attacked": False,
             "result": None,
             "action": None,
             "hud_before": None,
             "hud_after": None,
+            "report_path": None,
         }
         if not self.open_battle_menu():
             raise AttackEngineError("menu Battle non apribile")
@@ -400,7 +454,25 @@ class AttackEngine(UpgradeEngine):
                 raise AttackEngineError("menu Battle non chiudibile")
             report["action"] = "dry_run"
             return report
-        report["hud_before"] = self._hud_text()
+        hud = self.read_hud(self.grab())
+        report["hud_before"] = str(hud)
+        usable_gold: int | None = None
+        usable_elixir: int | None = None
+        attack_config = self.config.attack
+        if respect_storage_caps and attack_config.respect_storage_caps:
+            usable_gold, usable_elixir = usable_capacity(
+                hud,
+                cap_gold=attack_config.storage_cap_gold,
+                cap_elixir=attack_config.storage_cap_elixir,
+            )
+            report["usable_capacity"] = {"gold": usable_gold, "elixir": usable_elixir}
+            if usable_gold == 0 and usable_elixir == 0:
+                self.log(
+                    "run_attack: storage piene (oro+elisir al cap): nessuna ricerca avviata"
+                )
+                report["action"] = "storage_full"
+                self.close_battle_menu()
+                return self._finish_report(report)
         skip_session = SkipSession(
             max_skip=max(0, min(self.config.loot.max_skip_per_attack, max_searches - 1)),
             timeout_s=float(self.config.loot.skip_timeout_s),
@@ -412,10 +484,19 @@ class AttackEngine(UpgradeEngine):
             skip_session.start(time.monotonic())
             while True:
                 loot = self.read_loot()
-                report["loots"].append(
-                    {"gold": loot.gold, "elixir": loot.elixir, "dark": loot.dark}
+                effective = apply_capacity(
+                    loot, usable_gold=usable_gold, usable_elixir=usable_elixir
                 )
-                decision = evaluate_loot_from_config(self.config.loot, loot)
+                report["loots"].append(
+                    {
+                        "gold": loot.gold,
+                        "elixir": loot.elixir,
+                        "dark": loot.dark,
+                        "incassabile_gold": effective.gold,
+                        "incassabile_elixir": effective.elixir,
+                    }
+                )
+                decision = evaluate_loot_from_config(self.config.loot, effective)
                 report["decision"] = decision.reason
                 if decision.should_attack:
                     break

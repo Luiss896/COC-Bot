@@ -87,6 +87,11 @@ attack:
     exit_when_army_exhausted: true
   max_battle_duration_s: 180
   retry_on_error: 2
+  # cap delle storage note (HUD): con storage piene il bottino in eccesso va perso, quindi
+  # il bot evita di sprecare raid/ricerche quando oro+elisir sono al cap.
+  respect_storage_caps: true
+  storage_cap_gold: 10000000
+  storage_cap_elixir: 10000000
 
 loot:
   thresholds:

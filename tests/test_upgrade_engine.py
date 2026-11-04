@@ -102,6 +102,26 @@ def test_build_plan_filters_and_ordering() -> None:
     assert plan.scanned_rows == len(rows)
 
 
+def test_build_plan_only_filter_targets_single_row() -> None:
+    """``build_plan(..., only=...)`` considera solo la riga richiesta (match fuzzy)."""
+    rows = [
+        _row("Cannon", cost=100_000, currency="gold", scroll_index=0),
+        _row("Archer Tower", cost=800_000, currency="gold", scroll_index=1),
+        _row("Wall", cost=750_000, currency="elixir", level=13, scroll_index=2),
+    ]
+    plan = build_plan(Config(), _report(rows), only="Cannon")
+    assert [item.row.name for item in plan.chosen] == ["cannon"]
+    reasons = " | ".join(skipped.reason for skipped in plan.skipped)
+    assert "escluso dal filtro --only" in reasons
+    assert any("filtro --only" in note for note in plan.notes)
+    # match fuzzy: nome OCR leggermente sporco
+    plan2 = build_plan(Config(), _report(rows), only="Archor Tower")
+    assert [item.row.name for item in plan2.chosen] == ["archer tower"]
+    # target inesistente: nessun candidato
+    plan3 = build_plan(Config(), _report(rows), only="Drago")
+    assert plan3.chosen == []
+
+
 def test_build_plan_walls_can_be_disabled() -> None:
     config = Config()
     config.upgrade.include_walls = False

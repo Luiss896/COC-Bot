@@ -401,9 +401,16 @@ def walls_status(report: ScanReport) -> str:
     return "available" if any(row.cost is not None for row in wall_rows) else "max"
 
 
-def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
-    """Calcola il piano di upgrade da una scansione (funzione pura, testabile offline)."""
+def build_plan(config: Config, report: ScanReport, *, only: str | None = None) -> UpgradePlan:
+    """Calcola il piano di upgrade da una scansione (funzione pura, testabile offline).
+
+    ``only``: se indicato, considera **solo** la riga con quel nome (match fuzzy come le altre
+    navigazioni); utile per target espliciti/validazioni (``upgrade-run --only "Gold Mine"``).
+    """
     plan = UpgradePlan(hud=report.hud, scanned_rows=len(report.rows))
+    only_norm = canonical_name(only) if only else None
+    if only_norm is not None:
+        plan.notes.append(f"filtro --only attivo: {only!r}")
     if not config.upgrade.enabled:
         plan.notes.append("upgrade.enabled=false: nessun upgrade pianificato")
         return plan
@@ -415,6 +422,9 @@ def build_plan(config: Config, report: ScanReport) -> UpgradePlan:
         category = categorize(row.name)
         if category is None:
             plan.skipped.append(SkippedRow(row, "nome non riconosciuto (OCR/allowlist)"))
+            continue
+        if only_norm is not None and canonical_name(row.name) != only_norm:
+            plan.skipped.append(SkippedRow(row, f"escluso dal filtro --only {only!r}"))
             continue
         if category in ignore:
             plan.skipped.append(SkippedRow(row, "categoria in ignore_categories"))
@@ -1006,9 +1016,9 @@ class UpgradeEngine:
         return ScanReport(hud=hud, rows=rows, positions=scroll_index, elapsed_s=elapsed, notes=notes)
 
     # ------------------------------------------------------------------ pianificazione
-    def plan(self, report: ScanReport) -> UpgradePlan:
+    def plan(self, report: ScanReport, *, only: str | None = None) -> UpgradePlan:
         """Sceglie gli upgrade da fare secondo priorita'/riserve/config (solo calcolo)."""
-        return build_plan(self.config, report)
+        return build_plan(self.config, report, only=only)
 
     # ------------------------------------------------------------------ esecuzione
     def execute(self, plan: UpgradePlan, *, dry_run: bool = True) -> list[ExecutionResult]:

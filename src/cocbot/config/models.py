@@ -142,6 +142,11 @@ class AttackConfig(BaseModel):
     early_exit: EarlyExitConfig = Field(default_factory=EarlyExitConfig)
     max_battle_duration_s: int = Field(default=180, ge=30, le=300)
     retry_on_error: int = Field(default=2, ge=0, le=5)
+    # storage note (HUD): con storage piene il bottino in eccesso va perso; il loop attacco
+    # legge l'HUD prima di spendere una ricerca e salta il raid se oro+elisir sono al cap.
+    respect_storage_caps: bool = True
+    storage_cap_gold: int = Field(default=10_000_000, ge=0)
+    storage_cap_elixir: int = Field(default=10_000_000, ge=0)
 
 
 class LootConfig(BaseModel):

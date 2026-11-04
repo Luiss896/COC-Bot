@@ -110,18 +110,28 @@ skip) devono essere esplicite e tracciate.
 
 ## Limiti noti / da validare
 
-- **Storage piene**: con oro/elisir al tetto (10 000 000) il bottino in eccesso va perso; il loop
-  dovrebbe leggere l'HUD prima di attaccare e saltare/limitare i raid a cap raggiunto.
+- **Storage piene**: gestito il caso base (vedi aggiornamento 11:40). Resta da gestire la
+  priorità al dark elixir quando oro/elisir sono al cap.
 - **Early-exit in battaglia**: non implementato (si attende sempre la fine, max ~3 min).
 - **Robustezza deploy**: dipende dal rilevamento dell'erba per-base/camera; con pan funziona, ma
   vanno provate più basi e fallback (griglia già in uso).
-- **Telemetria raid**: i risultati vengono letti e stampati, ma non ancora salvati in un log/JSON
-  storico.
 
 ## Conseguenze
 
-Prossimi passi: **skip reale** ("Next" + `SkipSession`, con tetto di spesa), **spell**, early-exit
-in battaglia, telemetria dei raid; poi attacco live supervisionato con tetto di spesa per ricerca/skip.
+Prossimi passi: **early-exit** in battaglia, priorità dark a storage piene, telemetria aggregata
+(storico raid), poi attacco live supervisionato con tetto di spesa per ricerca/skip.
+
+### Aggiornamento 11:40 — attacco **cap-aware** e telemetria raid
+
+- **Cap-aware validato live**: `run_attack` legge l'HUD **prima** di spendere una ricerca; con
+  oro+elisir al cap (`attack.storage_cap_gold/elixir`, default 10 000 000) risponde
+  `action=storage_full` e **non spende nulla**. Live (11:40): HUD oro/elisir 10 000 000/10 000 000 →
+  capacità residua 0/0 → `storage_full`, ricerche=0, HUD invariato, gemme 1 925. `--ignore-caps`
+  permette di forzare il raid.
+- **Bottino incassabile**: la decisione usa `apply_capacity` (min tra loot e capacità residua), così
+  non si attacca per risorse che andrebbero perse; il report riporta `incassabile_gold/elixir`.
+- **Telemetria**: ogni raid salva un JSON in `out/attack/attack-<timestamp>.json` (gitignored) con
+  ricerche/skip, bottini, capacità, esito OCR, HUD prima/dopo e percorso del report.
 
 ### Aggiornamento 11:45 — skip reale ("Next") e spell validati live; raid **VITTORIA 79%**
 

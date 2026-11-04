@@ -52,12 +52,13 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Engine upgrade — esecuzione reale (edificio) VALIDATA a runtime**: riga catalogo → dialogo `Upgrade Air Bomb to Level 3?` verificato (nome/costo) → CONFIRM verde; **oro 7 323 700 → 7 286 200 (−37 500)**, builder **5/5 → 4/5**, elisir/dark/gemme invariati, HUD riletto in home. Scoperto e corretto un off-by-one: il catalogo mostra il livello di **destinazione** (non quello attuale), quindi il dialogo va confrontato con `row.level`, non `row.level + 1`
 - [x] **Engine upgrade — esecuzione reale (eroe) VALIDATA a runtime**: Barbarian King → dialogo `Upgrade Barbarian King to Level 53?` verificato (costo 44 000 dark) → CONFIRM; **dark 198 031 → 154 031 (−44 000)**, **builder 5/5 → 4/5**, oro/elisir/gemme invariati
 - [x] **Planner preset A/B mura** (config `walls.*`): con mura non max un builder resta riservato (gli edifici/eroi usano i restanti) e le mura non consumano slot (upgrade istantaneo); a mura max scatta il preset B (tutti i builder) + nota di auto-stop. Helper `walls_status` da scansione, test dedicati
+- [x] **Target esplicito `upgrade-run --only "<nome>"` VALIDATO live (dry-run)**: il planner considera solo la riga richiesta (match fuzzy); live: filtro attivo su 23 righe, `--only "Crafting Station"` seleziona esattamente le 3 righe Crafting Station e il dry-run le esegue a vuoto. `--only "Wall"` → 0 candidati (filtro applicato a tutte le righe) + report in `out/upgrade/`
 - [x] **OCR nomi riga — canonicalizzazione conservativa**: match fuzzy solo su nomi noti lunghi (≥6 caratteri, similarità ≥0,86) per recuperare errori piccoli; nomi davvero illeggibili ancora scartati. Usata da `categorize`, merge, scanner e navigazione live
 - [x] **Animazione UI gestita**: lo scroll del menu si anima ~1,8 s; engine attende la stabilizzazione (2 frame identici + verifica del cambio) prima di leggere/tappare — risolve le righe mappate su posizioni sbagliate
 - [x] **Auto-reload disconnessione VALIDATO COMPLETO**: modal di rete → retry → reload (**4,9 s**) → **home** verificata su disconnessione reale da inattività (4 nov, nessuna spesa). Riconosce anche lo stato **`MAINTENANCE`** e va in pausa sicura senza input; ripristina la finestra se il reload la minimizza
 - [x] **Esecuzione reale upgrade edificio/eroe** (riga → dialogo CONFIRM): **validata a runtime** (Air Bomb e Barbarian King, vedi sopra); il livello mostrato dal catalogo è quello di destinazione, non quello attuale
 - [x] **Opzioni eroi per auto-battaglia**: `attack.use_heroes` + `attack.heroes_require_ready` (config, pronte per il loop attacco)
-- [x] **Loop attacco v7 VALIDATO LIVE end-to-end (raid VINTO 79% + skip + spell)**: `attack-scan`, `ARMY_REVIEW`, `PREVIEW` (OCR loot + End Battle/**Next**), `BATTLE`, **camera pan** (`PostMessage` drag), deploy **13 draghi + 2 eroi + spell**, `BATTLE_END` + **OCR esiti** (`vision/battle_result.py`) e Return Home. **CLI `attack-run`** (dry-run default; `--allow-spend --max-searches N --spells N` = tetto di spesa). Live: raid **VINTO 79%** (bottino 555 000/1 093 570/5 958), raid VINTO 15%, defeat 2%; **"Next" validato live** (cambio base + rilettura loot); risorse arrivate al **cap 10 000 000** oro/elisir; ricerche ~1 100 oro; **gemme mai spese** (1 925). Da completare: attacchi cap-aware, early-exit, telemetria
+- [x] **Loop attacco v7 VALIDATO LIVE end-to-end (raid VINTO 79% + skip + spell)**: `attack-scan`, `ARMY_REVIEW`, `PREVIEW` (OCR loot + End Battle/**Next**), `BATTLE`, **camera pan** (`PostMessage` drag), deploy **13 draghi + 2 eroi + spell**, `BATTLE_END` + **OCR esiti** (`vision/battle_result.py`) e Return Home. **CLI `attack-run`** (dry-run default; `--allow-spend --max-searches N --spells N` = tetto di spesa). Live: raid **VINTO 79%** (bottino 555 000/1 093 570/5 958), raid VINTO 15%, defeat 2%; **"Next" validato live** (cambio base + rilettura loot); **attacco cap-aware** (HUD prima del raid: con oro/elisir al cap 10 000 000 → `storage_full`, nessuna spesa; `--ignore-caps` per forzare) e **telemetria** JSON in `out/attack/`; ricerche ~1 100 oro; **gemme mai spese** (1 925). Da completare: early-exit, priorità dark a storage piene
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
 - [ ] Loop attacco completo (skip reale + deploy dragon spam affidabile + esiti)
 - [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
@@ -92,6 +93,7 @@ python -m cocbot upgrade-scan                # report JSON in out/upgrade/
 
 # 8) esegue gli upgrade pianificati (DRY-RUN di default; --execute preme CONFIRM e spende)
 python -m cocbot upgrade-run                 # dry-run
+python -m cocbot upgrade-run --only "Crafting Station"   # target esplicito (match fuzzy), dry-run
 python -m cocbot upgrade-run --execute       # attenzione: spend e risorse
 
 # 9) registra un dataset di schermate etichettate (gioco in fullscreen, tap non invasivi)
@@ -106,6 +108,7 @@ python -m cocbot attack-scout                # dry-run: apre My Army e chiude (n
 python -m cocbot attack-scout --allow-spend  # ricerca base (~1100 oro), legge loot, End Battle
 python -m cocbot attack-run                  # dry-run del ciclo completo (nessuna spesa)
 python -m cocbot attack-run --allow-spend --max-searches 2  # raid reale: ricerca/Next, deploy, esiti
+python -m cocbot attack-run --allow-spend --ignore-caps      # forza il raid anche a storage piene
 ```
 
 > `probe` è **solo lettura**. `capture`/`input-test` non rubano focus né muovono il cursore.
