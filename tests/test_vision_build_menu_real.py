@@ -181,6 +181,28 @@ def test_battle_menu_window_real_frame() -> None:
     assert ui.find_battle_menu_close(_load("build-menu-top.png")) is None
 
 
+def test_army_review_window_real_frame() -> None:
+    """Frame live del pannello "My Army": stato, X rossa e pulsante verde "Attack!"."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    frame = _load("army-review-window.png")
+    assert states.classify(frame) is ScreenState.ARMY_REVIEW
+    point = ui.find_army_panel_close(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.88 < point[0] / w < 0.96
+    assert 0.09 < point[1] / h < 0.17
+    attack = ui.find_attack_button(frame)
+    assert attack is not None
+    assert 0.78 < (attack.x + attack.w / 2) / w < 0.96
+    assert 0.79 < (attack.y + attack.h / 2) / h < 0.95
+    # nessun falso positivo su home / menu Battle
+    assert ui.find_attack_button(_load("home-after-panels.png")) is None
+    assert ui.find_army_panel_close(_load("home-after-panels.png")) is None
+    assert ui.find_army_panel_close(_load("battle-menu-window.png")) is None
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 

@@ -618,12 +618,18 @@ class UpgradeEngine:
             self._rebind_window(info)
         if win32.is_minimized(info.hwnd):
             raise UpgradeEngineError("finestra del gioco minimizzata")
-        for _attempt in range(3):
+        for attempt in range(8):
             frame = self.source.grab()
             image = frame.image
             if image is not None and image.size > 0 and not frame.metadata.get("black"):
                 return image
-            time.sleep(0.3)
+            if attempt == 3 and self._own_source:
+                # la sessione WGC puo' consegnare frame neri per un po' (occlusione/GPU):
+                # la ricreo una volta prima di dichiarare la finestra inutilizzabile
+                self.log("grab: frame neri ripetuti, ricreo la sessione WGC")
+                self.source.close()
+                self.source = WgcScreenSource(self.window, target_fps=self.config.capture.target_fps)
+            time.sleep(0.2 + 0.1 * attempt)
         raise UpgradeEngineError("frame nero: la finestra del gioco e' minimizzata o coperta in modo anomalo")
 
     # ------------------------------------------------------------------ reload/attesa
@@ -829,6 +835,8 @@ class UpgradeEngine:
                 point = ui.find_placement_exit(image)
             elif state is ScreenState.BATTLE_MENU:
                 point = ui.find_battle_menu_close(image)
+            elif state is ScreenState.ARMY_REVIEW:
+                point = ui.find_army_panel_close(image)
             elif state is ScreenState.BUILD_MENU:
                 point = ui.find_menu_close(image)
             elif state is ScreenState.MAINTENANCE:

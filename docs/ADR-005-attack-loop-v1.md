@@ -35,6 +35,10 @@ V1 in **sola lettura**, in quattro parti:
    **Non preme mai "Find a Match"**: in v1 nessun raid viene avviato.
 4. **CLI `python -m cocbot attack-scan`**: stampa stato, riquadro/centro del pulsante e note;
    nessuna spesa, nessuna battaglia.
+5. **`ARMY_REVIEW`** (pannello "My Army" pre-battaglia): tap su "Find a Match" → pannello esercito
+   con X rossa e pulsante verde "Attack!". `AttackEngine.open_army_panel()` / `close_army_panel()`
+   validati live (2 cicli); la ricerca base (a pagamento, ~1100 oro) parte solo da "Attack!",
+   che **non viene premuto** in v1.
 
 ## Evidenze
 
@@ -48,7 +52,12 @@ V1 in **sola lettura**, in quattro parti:
   trasparente in alto a destra a (0,986 W, 0,025 H). ESC via messaggio **e** ESC via SendInput con
   focus **non** chiudono (verificato live). `ui.find_battle_menu_close` restituisce il punto solo
   se il frame e' davvero `BATTLE_MENU` (mai tappare l'angolo gemme della home).
-- `UpgradeEngine.grab`: retry breve sui primi frame neri WGC (artefatto transitorio di sessione).
+- `UpgradeEngine.grab`: retry breve sui primi frame neri WGC (artefatto transitorio di sessione);
+  `WgcScreenSource.grab` attende un frame **nuovo** (evita frame stantii) e l'engine ricrea la
+  sessione WGC se riceve frame neri ripetuti.
+- **Pannello "My Army" (`ARMY_REVIEW`)**: riconosciuto da X rossa + pulsante verde "Attack!".
+  Live 4 nov: 2 cicli apri/chiudi pannello (home → army_review → home), nessuna spesa. Frame live
+  windowed salvato in `dataset/build-win-20261103/army-review-window.png`.
 - Nessun falso positivo su `01_home.png` e `02_build_menu.png` (pulsante assente).
 - Policy loot: casi buono / sotto soglia / score insufficiente / bottino illeggibile /
   dark assente / pesi da config.

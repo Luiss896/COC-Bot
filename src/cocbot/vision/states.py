@@ -6,6 +6,7 @@ Il classificatore e' volutamente **conservativo**: se non riconosce lo stato res
 Stati riconosciuti oggi (verificati su frame reali):
 - ``HOME``: villaggio principale, nessun pannello/menu aperto;
 - ``BATTLE_MENU``: menu Battle (pannello sinistro con "Find a Match" arancione);
+- ``ARMY_REVIEW``: pannello "My Army" pre-battaglia (X rossa + pulsante verde "Attack!").
 - ``BUILD_MENU``: menu "Buildings & Heroes" (pannello a destra + X in alto a destra);
 - ``UPGRADE_CONFIRM``: dialogo "Upgrade <X> to Level <N>?" con X centrale;
 - ``PLACEMENT``: modalita' piazzamento nuovo edificio (X rossa + spunta al centro);
@@ -39,6 +40,8 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.NETWORK_ERROR
     if ui.find_placement_exit(image) is not None:
         return ScreenState.PLACEMENT
+    if ui.find_attack_button(image) is not None and ui.find_army_panel_close(image) is not None:
+        return ScreenState.ARMY_REVIEW
     if ui.find_maintenance_banner(image):
         return ScreenState.MAINTENANCE
     if _is_build_menu(image):
@@ -61,6 +64,7 @@ def describe(state: ScreenState) -> str:
     descriptions = {
         ScreenState.HOME: "home village",
         ScreenState.BATTLE_MENU: "menu Battle (Multiplayer/Single/Practice)",
+        ScreenState.ARMY_REVIEW: "anteprima esercito pre-battaglia (My Army, pulsante Attack!)",
         ScreenState.BUILD_MENU: "menu Build (Buildings & Heroes)",
         ScreenState.UPGRADE_CONFIRM: "dialogo conferma upgrade",
         ScreenState.PLACEMENT: "piazzamento nuovo edificio",

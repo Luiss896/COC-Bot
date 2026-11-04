@@ -155,6 +155,50 @@ def find_battle_menu_close(image: np.ndarray) -> tuple[int, int] | None:
 
 
 # ---------------------------------------------------------------------------
+# Pannello "My Army" (anteprima pre-battaglia): X rossa e pulsante verde "Attack!".
+# Misure live 4 nov (finestra 1733x975): X rossa (0,919 W, 0,139 H); "Attack!" centro
+# (0,849 W, 0,852 H), rect 290x57 px.
+# ---------------------------------------------------------------------------
+ARMY_CLOSE_REGION = (0.88, 0.09, 0.10, 0.09)  # (x, y, w, h) frazioni: dove sta la X rossa
+ARMY_ATTACK_REGION = (0.78, 0.79, 0.18, 0.14)  # regione del pulsante verde "Attack!"
+
+
+def find_army_panel_close(image: np.ndarray) -> tuple[int, int] | None:
+    """Centro della X rossa del pannello "My Army" (anteprima pre-battaglia), o ``None``."""
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * ARMY_CLOSE_REGION[0])
+    y0 = int(h * ARMY_CLOSE_REGION[1])
+    x1 = int(w * (ARMY_CLOSE_REGION[0] + ARMY_CLOSE_REGION[2]))
+    y1 = int(h * (ARMY_CLOSE_REGION[1] + ARMY_CLOSE_REGION[3]))
+    for component in _red_components(image):
+        _area, cx, cy = component[0], component[1], component[2]
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            return cx, cy
+    return None
+
+
+def find_attack_button(image: np.ndarray) -> Rect | None:
+    """Riquadro del pulsante verde "Attack!" dell'anteprima esercito, o ``None``."""
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * ARMY_ATTACK_REGION[0])
+    y0 = int(h * ARMY_ATTACK_REGION[1])
+    x1 = int(w * (ARMY_ATTACK_REGION[0] + ARMY_ATTACK_REGION[2]))
+    y1 = int(h * (ARMY_ATTACK_REGION[1] + ARMY_ATTACK_REGION[3]))
+    hsv = _hsv(image)
+    mask = cv2.inRange(hsv, GREEN_BUTTON_LOW, GREEN_BUTTON_HIGH)
+    mask[:y0, :] = 0
+    mask[y1:, :] = 0
+    mask[:, :x0] = 0
+    mask[:, x1:] = 0
+    components = _components(mask, min_area=int(_BUTTON_MIN_AREA * w * h))
+    return _rect_from_component(components[0]) if components else None
+
+
+# ---------------------------------------------------------------------------
 # Manutenzione del gioco ("MAINTENANCE BREAK"): banner a strisce gialle in alto.
 # ---------------------------------------------------------------------------
 MAINTENANCE_BANNER_HEIGHT = 0.075  # fascia alta (frazione H) con le strisce gialle

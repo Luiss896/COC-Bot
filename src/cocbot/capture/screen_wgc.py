@@ -152,6 +152,15 @@ class WgcScreenSource:
                 self._cond.wait(max(0.05, deadline - time.monotonic()))
             if self._latest is None:
                 raise RuntimeError(f"cattura WGC non disponibile: {self._last_error or 'nessun frame'}")
+            # Attende un frame NUOVO se l'ultimo e' gia' stato consegnato: cosi' non si
+            # restituiscono frame stantii/neri (es. primo frame nero della sessione WGC).
+            target = self._read_counter + 1
+            while (
+                self._latest_counter < target
+                and self._last_error is None
+                and time.monotonic() < deadline
+            ):
+                self._cond.wait(max(0.01, deadline - time.monotonic()))
             if self._latest_counter == self._read_counter:
                 self._stale_frames += 1
                 stale = True

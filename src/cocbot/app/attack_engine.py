@@ -179,6 +179,40 @@ class AttackEngine(UpgradeEngine):
             return True
         return self.recover_home()
 
+    def open_army_panel(self) -> bool:
+        """Apre il pannello "My Army" (anteprima pre-battaglia) dal menu Battle.
+
+        Non spende risorse: la ricerca base (a pagamento) parte solo dal pulsante "Attack!".
+        """
+        if not self.open_battle_menu():
+            return False
+        image = self.grab()
+        button = ui.find_find_match_button(image)
+        if button is None:
+            self.log("open_army_panel: pulsante 'Find a Match' non trovato")
+            return False
+        self._tap(ui.center(button), wait_s=1.2)
+        frame = self._wait_state(ScreenState.ARMY_REVIEW, timeout_s=5.0)
+        if frame is None:
+            self.log("open_army_panel: pannello 'My Army' non rilevato")
+            return False
+        return True
+
+    def close_army_panel(self) -> bool:
+        """Chiude il pannello "My Army" con la X rossa e torna in home."""
+        image = self.grab()
+        state = states.classify(image)
+        if state is ScreenState.HOME:
+            return True
+        point = ui.find_army_panel_close(image)
+        if point is None:
+            self.log(f"close_army_panel: X non trovata (stato {state.value}), uso recover_home")
+            return self.recover_home()
+        self._tap(point, wait_s=1.2)
+        if self._wait_state(ScreenState.HOME, timeout_s=4.0) is not None:
+            return True
+        return self.recover_home()
+
     def scan_battle_menu(self) -> BattleMenuRead:
         """Apre il menu Battle, legge gli elementi principali e torna in home (sola lettura)."""
         notes: list[str] = []
