@@ -532,16 +532,21 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             max_searches=max(1, args.max_searches),
             dragons=max(1, args.dragons),
             heroes=not args.no_heroes,
+            spells=max(0, args.spells),
         )
         print("\n== ATTACK RUN ==")
         print(f"  dry_run={report['dry_run']} azione={report['action']}")
         print(f"  ricerche={report['searches']} skip={report['skips']}")
+        if report.get("skip_limit_reason"):
+            print(f"  limite skip: {report['skip_limit_reason']}")
         for index, loot in enumerate(report["loots"], start=1):
             print(f"  loot {index}: oro={loot['gold']} elisir={loot['elixir']} dark={loot['dark']}")
         if report.get("decision"):
             print(f"  decisione: {report['decision']}")
         if report.get("deploy_taps") is not None:
             print(f"  tap deploy: {report['deploy_taps']}")
+        if report.get("spell_taps") is not None:
+            print(f"  tap spell: {report['spell_taps']}")
         result = report.get("result")
         if result:
             print(
@@ -680,6 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attack_run.add_argument("--dragons", type=int, default=13)
     attack_run.add_argument("--no-heroes", action="store_true")
+    attack_run.add_argument("--spells", type=int, default=0, help="spell da lanciare dopo il deploy")
     attack_run.set_defaults(func=cmd_attack_run)
 
     return parser

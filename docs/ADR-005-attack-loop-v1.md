@@ -1,9 +1,9 @@
-# ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v5)
+# ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v7)
 
 **Data:** 2026-11-04 · **Stato:** implementata e **validata live end-to-end**: menu Battle, My Army,
-anteprima con OCR loot, battaglia, **camera pan + deploy di 13 draghi e 2 eroi**, esito
-(Victory 1 stella), bottino incassato e ritorno in home (gemme mai spese). Restano skip reale,
-OCR esiti e spell.
+anteprima con OCR loot, **skip reale ("Next")**, battaglia con **camera pan + 13 draghi + 2 eroi +
+spell**, esito (Victory), **OCR esiti**, bottino incassato e ritorno in home (gemme mai spese).
+Restano: early-exit, telemetria e attacchi "cap-aware" (storage piene).
 
 ## Contesto
 
@@ -110,17 +110,32 @@ skip) devono essere esplicite e tracciate.
 
 ## Limiti noti / da validare
 
-- **Skip reale ("Next")**: mai premuto live (costa ~1 100 oro); `SkipSession` pronta ma non collegata.
-- **Spell**: mai deployate; da provare (card spell in barra).
-- **OCR esiti**: il banner Victoy/Defeat, le stelle, il % danno e "You got" non hanno ancora un
-  parser: si leggono a video ma non sono automatizzati (prossimo passo per il loop con early-exit).
+- **Storage piene**: con oro/elisir al tetto (10 000 000) il bottino in eccesso va perso; il loop
+  dovrebbe leggere l'HUD prima di attaccare e saltare/limitare i raid a cap raggiunto.
+- **Early-exit in battaglia**: non implementato (si attende sempre la fine, max ~3 min).
 - **Robustezza deploy**: dipende dal rilevamento dell'erba per-base/camera; con pan funziona, ma
   vanno provate più basi e fallback (griglia già in uso).
+- **Telemetria raid**: i risultati vengono letti e stampati, ma non ancora salvati in un log/JSON
+  storico.
 
 ## Conseguenze
 
 Prossimi passi: **skip reale** ("Next" + `SkipSession`, con tetto di spesa), **spell**, early-exit
 in battaglia, telemetria dei raid; poi attacco live supervisionato con tetto di spesa per ricerca/skip.
+
+### Aggiornamento 11:45 — skip reale ("Next") e spell validati live; raid **VITTORIA 79%**
+
+- **"Next" validato live**: anteprima A (loot 300 014 / 819 462 / 562) → "Next" (~1 100 oro) →
+  anteprima B **diversa** (173 042 / 146 738 / 13 828) → End Battle. Il cambio base e la rilettura
+  del loot funzionano. `run_attack` ora applica anche `SkipSession` (`loot.max_skip_per_attack`,
+  `loot.skip_timeout_s`) oltre al tetto `max_searches`.
+- **Spell validate live**: `deploy_spells` (card spell → tap sul campo) lancia 5 spell; nel raid:
+  **13 draghi + 2 eroi + 5 spell** → **VICTORY, 79% danno**; bottino **555 000 oro / 1 093 570
+  elisir / 5 958 dark** ("Troops expended" 18); Return Home OK; gemme 1 925 invariate.
+- **Limite scoperto**: le risorse dell'account sono arrivate al **tetto** (oro/elisir 10 000 000):
+  il bottino in eccesso va perso. Prossimo miglioramento: **leggere l'HUD prima di attaccare** e
+  non sprecare raid quando le storage sono piene (o dare priorità al dark elixir).
+- Frame anteprima dopo "Next" salvato in `dataset/build-win-20261103/preview-next-base.png`.
 
 ### Aggiornamento 11:27 — `attack-run`: ciclo completo live + OCR esiti
 

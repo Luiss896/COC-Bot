@@ -364,19 +364,23 @@ class AttackEngine(UpgradeEngine):
         max_searches: int = 2,
         dragons: int = 13,
         heroes: bool = True,
+        spells: int = 0,
         battle_end_timeout_s: float = 240.0,
     ) -> dict:
         """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
 
         ``allow_spend=False`` = **dry-run**: apre e richiude il pannello esercito senza spendere.
         Con ``allow_spend=True`` ogni ricerca/"Next" costa ~1100 oro e ``max_searches`` limita il
-        numero totale di ricerche (= tetto di spesa ``max_searches * 1100`` oro circa).
+        numero totale di ricerche (= tetto di spesa ``max_searches * 1100`` oro circa); in piu'
+        ``SkipSession`` applica i limiti di config ``loot.max_skip_per_attack`` / ``skip_timeout_s``.
+        ``spells``: quante spell lanciare dopo draghi/eroi (0 = nessuna).
         Ritorna un report con ricerche/skip, bottini letti, decisione, esito e HUD prima/dopo.
         """
         report: dict = {
             "dry_run": not allow_spend,
             "searches": 0,
             "skips": 0,
+            "skip_limit_reason": None,
             "loots": [],
             "decision": None,
             "attacked": False,
@@ -397,10 +401,15 @@ class AttackEngine(UpgradeEngine):
             report["action"] = "dry_run"
             return report
         report["hud_before"] = self._hud_text()
+        skip_session = SkipSession(
+            max_skip=max(0, min(self.config.loot.max_skip_per_attack, max_searches - 1)),
+            timeout_s=float(self.config.loot.skip_timeout_s),
+        )
         try:
             if not self.open_search():
                 raise AttackEngineError("ricerca base non avviata / anteprima non rilevata")
             report["searches"] = 1
+            skip_session.start(time.monotonic())
             while True:
                 loot = self.read_loot()
                 report["loots"].append(
@@ -410,8 +419,23 @@ class AttackEngine(UpgradeEngine):
                 report["decision"] = decision.reason
                 if decision.should_attack:
                     break
+                if (
+                    self.config.loot.skip_if_unreadable
+                    and loot.gold is None
+                    and loot.elixir is None
+                    and loot.dark is None
+                ):
+                    report["action"] = "unreadable_loot"
+                    self.end_battle()
+                    return self._finish_report(report)
                 if report["searches"] >= max_searches:
-                    report["action"] = "ended_bad_loot"
+                    report["action"] = "search_cap"
+                    self.end_battle()
+                    return self._finish_report(report)
+                can_skip, reason = skip_session.can_continue(time.monotonic())
+                if not can_skip:
+                    report["action"] = "skip_limit"
+                    report["skip_limit_reason"] = reason
                     self.end_battle()
                     return self._finish_report(report)
                 if not self.next_base():
@@ -421,6 +445,7 @@ class AttackEngine(UpgradeEngine):
                     return self._finish_report(report)
                 report["searches"] += 1
                 report["skips"] += 1
+                skip_session.record_skip(time.monotonic())
             if not self.wait_battle_start():
                 report["action"] = "battle_not_started"
                 self.end_battle()
@@ -432,6 +457,8 @@ class AttackEngine(UpgradeEngine):
             report["deploy_taps"] = self.deploy_dragon_spam(
                 self.grab(), dragons=dragons, heroes=heroes
             )
+            if spells > 0:
+                report["spell_taps"] = self.deploy_spells(self.grab(), count=spells)
             end_frame = self._wait_state(ScreenState.BATTLE_END, timeout_s=battle_end_timeout_s)
             if end_frame is None:
                 report["action"] = "battle_end_timeout"
@@ -480,6 +507,25 @@ class AttackEngine(UpgradeEngine):
         win32.post_mouse_drag(self.window.hwnd, x0, y0, x1, y1, steps=12, hold_ms=60)
         time.sleep(0.6)
         self.log(f"pan_camera: drag ({x0},{y0})->({x1},{y1})")
+
+    def deploy_spells(self, image: np.ndarray, *, count: int = 5) -> int:
+        """Seleziona la card spell e lancia le spell sulle tessere di erba/centro villaggio.
+
+        Meccanica assunta (da validare live): tap card spell = seleziona, tap sul campo = lancia.
+        Ritorna i tap inviati (2 per spell).
+        """
+        h, w = image.shape[:2]
+        card = ui.battle_card_point(image, ui.BATTLE_SPELL_CARD)
+        targets = ui.find_deploy_candidates(image, limit=8)
+        if not targets:
+            targets = [(int(w * 0.50), int(h * 0.45))]
+        taps = 0
+        self.log(f"deploy_spells: seleziono la spell @ {card} e ne lancio {count}")
+        for index in range(count):
+            self._tap(card, wait_s=0.35)
+            self._tap(targets[index % len(targets)], wait_s=0.5)
+            taps += 2
+        return taps
 
     def deploy_dragon_spam(
         self,
