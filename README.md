@@ -60,7 +60,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Loop attacco v1 (sola lettura)**: `attack-scan` apre/chiude il menu Battle, `BATTLE_MENU` riconosciuto (pulsante "Find a Match" geometrico validato su frame reali) e policy loot pura `evaluate_loot` (soglie oro/elisir/dark + score pesato; bottino illeggibile → mai attaccare). Nessun raid avviato in v1
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
 - [ ] Loop attacco completo (skip + deploy dragon spam): v1 sola lettura fatta, esecuzione da validare su frame reali
-- [ ] Wall bulk (`Upgrade MORE`/`Select ROW`) — non supportato di proposito in v1
+- [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
 - [ ] GUI PySide6 completa
 
 ## Quick start
@@ -140,6 +140,7 @@ docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
 docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
 docs/ADR-004-...             vision/OCR + geometria menu Build + engine upgrade (muri e upgrade classico validati a runtime)
 docs/ADR-005-...             loop attacco v1: menu Battle in sola lettura + policy loot (skip/deploy da validare)
+docs/ADR-006-...             bulk walls: valutazione e decisione (non supportato in v1, condizioni)
 tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey,
                              vision/parser, dataset reale locale, planner/merge upgrade, pannello muro,
                              menu Battle + policy loot attacco)

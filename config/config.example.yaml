@@ -133,6 +133,9 @@ walls:
   reserve_builder_for_walls: true
   switch_to_all_builders_when_walls_max: true
   auto_stop_when_walls_max: true
+  # NOTA: "Select ROW" / "Upgrade MORE" (upgrade multiplo di muri) NON sono supportati:
+  # decisione e condizioni per introdurli in docs/ADR-006-bulk-walls-decisione.md.
+  # Si aggiornano al massimo `max_wall_batches_per_cycle` muri per ciclo, uno alla volta.
 
 scheduler:
   farm_phase_minutes: 45
