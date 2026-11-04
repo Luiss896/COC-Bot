@@ -27,7 +27,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: catalogo nativo (nome, livello, costo, valuta, tempo), **eroi inclusi**. Engine: legge la lista, filtra per priorità/riserve/builder, conferma solo "Upgrade" (mai "Finish Now"/gemme). **Mura validate a runtime** (riga Wall → pannello azioni → Upgrade oro **o** elisir → dialogo conferma → CONFIRM; un muro reale potenziato 12→13 con verifica risorse). **Upgrade classico (edificio/eroe) validato a runtime** (riga catalogo → dialogo di conferma → CONFIRM; Air Bomb: oro −37 500; Barbarian King: dark −44 000; builder consumato, gemme invariate). Vedi [ADR-004](docs/ADR-004-vision-ocr-engine-upgrade.md). |
 | **Priorità upgrade** | Scelta utente (3 nov): **mura → difese → offensiva → eroi → risorse → other** (`upgrade.priority`); mura attive di default (`upgrade.include_walls: true`) con limite `walls.max_wall_batches_per_cycle` e budget cumulativo con riserve per valuta. |
 | **Disconnessione/inattività** | L'engine riconosce i modal di rete **"Connection lost / TRY AGAIN"** e **"Anyone there? / RELOAD GAME"** e **gestisce da solo** retry + attesa caricamento + ripristino finestra se minimizzata. Riconosce anche la **manutenzione del gioco** (`MAINTENANCE BREAK`) e resta in pausa senza inviare input. Nessun avvio automatico di GPGPC. |
-| **Strategia eroi (auto-battaglia)** | Opzioni pronte per il loop attacco: `attack.use_heroes` (schierare gli eroi) e `attack.heroes_require_ready` (un eroe in upgrade non è schierabile → escludi/attendi). **Loop attacco v1 validato live**: `attack-scan` apre/legge/chiude il menu Battle (hit area di chiusura in alto a destra), pulsante "Find a Match" e policy loot testabili; esecuzione raid (skip + deploy dragon spam) ancora da implementare/validare su frame reali. Vedi [ADR-005](docs/ADR-005-attack-loop-v1.md). |
+| **Strategia eroi (auto-battaglia)** | Opzioni pronte per il loop attacco: `attack.use_heroes` (schierare gli eroi) e `attack.heroes_require_ready` (un eroe in upgrade non è schierabile → escludi/attendi). **Loop attacco v2 validato live fino all'anteprima base**: `attack-scan` (menu Battle, sola lettura), `attack-scout` (anteprima My Army → ricerca → **OCR del loot** → decisione con soglie → "End Battle" **senza deploy**). Deploy dragon spam e skip reale ancora da implementare. Vedi [ADR-005](docs/ADR-005-attack-loop-v1.md). |
 | **Vision/OCR** | Testo con **OCR** (`rapidocr` + `onnxruntime`, extra `ocr`); UI con euristiche cromatiche/geometriche. Geometria in frazioni del frame (windowed e fullscreen). OCR solo sul pannello Build e solo quando serve (~0,93 s/schermata; scansione completa ~85 s). I **piccoli errori OCR sui nomi noti** vengono recuperati con una canonicalizzazione fuzzy conservativa (`Craftina Station` → `Crafting Station`, usata anche da merge e navigazione live); i nomi davvero illeggibili restano **scartati** (mai indovinare). Immagini di gioco **non versionate** (dati account). |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
 
@@ -57,9 +57,9 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Auto-reload disconnessione**: modal di rete → retry → attesa caricamento (splash→home) → ripristino finestra se minimizzata. **Esercitato su disconnessione reale il 4 nov** (variante "Connection lost": retry + reload eseguiti, nessuna spesa; ritorno in home bloccato dalla manutenzione server sopraggiunta, da riconfermare). Stato **`MAINTENANCE`** riconosciuto e gestito in pausa sicura (nessun input)
 - [x] **Esecuzione reale upgrade edificio/eroe** (riga → dialogo CONFIRM): **validata a runtime** (Air Bomb e Barbarian King, vedi sopra); il livello mostrato dal catalogo è quello di destinazione, non quello attuale
 - [x] **Opzioni eroi per auto-battaglia**: `attack.use_heroes` + `attack.heroes_require_ready` (config, pronte per il loop attacco)
-- [x] **Loop attacco v1 (sola lettura) VALIDATO LIVE**: `attack-scan` apre/chiude il menu Battle (2 cicli live, hit area di chiusura in alto a destra), `BATTLE_MENU` riconosciuto (pulsante "Find a Match" geometrico validato su frame reali), policy loot pura `evaluate_loot` (soglie oro/elisir/dark + score pesato; bottino illeggibile → mai attaccare) e `SkipSession`. Nessun raid avviato in v1
+- [x] **Loop attacco v2 VALIDATO LIVE fino all'anteprima base**: `attack-scan` (menu Battle, 2 cicli live con hit area di chiusura), `ARMY_REVIEW` (pannello My Army, X + "Attack!"), `PREVIEW` (anteprima base con **OCR loot** 225 713/170 241/3 313 sul frame reale, "End Battle" e "Next", decisione con soglie/score, uscita senza deploy). Costo ricerca base misurato: −1 100 oro esatti. Deploy/battaglia non implementati
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
-- [ ] Loop attacco completo (skip + deploy dragon spam): v1 sola lettura fatta, esecuzione da validare su frame reali
+- [ ] Loop attacco completo (skip reale + deploy dragon spam + esiti): anteprima base validata, battaglia da implementare
 - [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
 - [ ] GUI PySide6 completa
 
@@ -100,8 +100,10 @@ python tools/record_session.py            # output in dataset/raw-<data>/ con co
 # 10) backend ADB opzionale (se installi il Developer Emulator)
 python -m cocbot adb-check
 
-# 11) loop attacco v1: apre e legge il menu Battle (SOLA LETTURA: nessun raid avviato)
+# 11) loop attacco: menu Battle (SOLA LETTURA) e anteprima base senza deploy
 python -m cocbot attack-scan
+python -m cocbot attack-scout                # dry-run: apre My Army e chiude (nessuna spesa)
+python -m cocbot attack-scout --allow-spend  # ricerca base (~1100 oro), legge loot, End Battle
 ```
 
 > `probe` è **solo lettura**. `capture`/`input-test` non rubano focus né muovono il cursore.
@@ -114,10 +116,10 @@ python -m cocbot attack-scan
 config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrade, mura, GUI, humanize)
 src/cocbot/
   __main__.py                CLI: probe | capture | input-test | gui | bench | config-check | adb-check
-                             | upgrade-scan | upgrade-run | attack-scan
+                             | upgrade-scan | upgrade-run | attack-scan | attack-scout
   app/controller.py          ciclo start/stop, cattura, pause, tap a vuoto umanizzati
   app/upgrade_engine.py      engine upgrade: HUD, scansione menu Build, planner, esecuzione verificata
-  app/attack_engine.py       loop attacco v1: menu Battle in sola lettura + policy loot testabile
+  app/attack_engine.py       loop attacco: menu Battle, My Army, anteprima base (loot OCR) + policy
   core/                      tipi e contratti (ScreenSource, InputSink, Device)
   config/                    modelli pydantic + loader
   safety/humanize.py         humanization/anti-ban: ritmi, pause, rate limit, avvisi
@@ -126,7 +128,7 @@ src/cocbot/
   vision/textparse.py        parsing importi/tempi/livelli/nomi ("Wall x 284", "2h 30m")
   vision/ui.py               primitive UI: pulsanti, X, CONFIRM, modal inattività, pannello righe
   vision/build_menu.py       lettura righe menu Build (livello/tempo/costo/valuta) + dialogo conferma
-  vision/states.py           classifier stato schermo (home/battle_menu/build_menu/upgrade_confirm/...)
+  vision/states.py           classifier stato schermo (home/battle_menu/army_review/preview/build_menu/...)
   gui/                       GUI minimale tkinter + hotkey globali
   capture/
     win32.py                 wrapper ctypes (DPI, finestre, input SendInput e messaggi Win32)
@@ -139,11 +141,11 @@ src/cocbot/
 docs/ADR-002-...             decisione backend non invasivo (evidenze e limiti)
 docs/ADR-003-...             humanization/anti-ban: cosa facciamo e cosa non possiamo garantire
 docs/ADR-004-...             vision/OCR + geometria menu Build + engine upgrade (muri e upgrade classico validati a runtime)
-docs/ADR-005-...             loop attacco v1: menu Battle in sola lettura + policy loot (skip/deploy da validare)
+docs/ADR-005-...             loop attacco: menu Battle, My Army e anteprima base (loot OCR) validati live; deploy da fare
 docs/ADR-006-...             bulk walls: valutazione e decisione (non supportato in v1, condizioni)
 tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey,
                              vision/parser, dataset reale locale, planner/merge upgrade, pannello muro,
-                             menu Battle + policy loot attacco)
+                             menu Battle + My Army + anteprima base + loot OCR + policy attacco)
 tools/                       record_session.py (dataset), poc_wgc.py, poc_bg_input.py
 dataset/                     sessioni dataset locali (IGNORATA da git: contiene dati account)
 ```

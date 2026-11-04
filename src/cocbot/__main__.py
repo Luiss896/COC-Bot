@@ -471,6 +471,51 @@ def cmd_attack_scan(args: argparse.Namespace) -> int:
         engine.close()
 
 
+def cmd_attack_scout(args: argparse.Namespace) -> int:
+    """Anteprima base: apre la ricerca, legge il loot e torna in home SENZA deployare.
+
+    Senza ``--allow-spend`` e' un dry-run: apre solo menu Battle e pannello My Army (nessuna
+    spesa). Con ``--allow-spend`` preme "Attack!" (ricerca base, ~1100 oro) e legge il loot.
+    """
+    from cocbot.app.attack_engine import AttackEngine, AttackEngineError, evaluate_loot_from_config
+
+    _, engine = _load_engine(args.config, AttackEngine)
+    try:
+        if not engine.open_army_panel():
+            print("ERRORE: pannello My Army non aperto")
+            return 1
+        print("\n== ANTEPRIMA ESERCITO (My Army) ==")
+        print("  pannello aperto; 'Attack!' avvia la ricerca base (~1100 oro)")
+        if not getattr(args, "allow_spend", False):
+            print("  DRY-RUN: nessuna ricerca avviata (usa --allow-spend per spendere ~1100 oro).")
+            engine.close_army_panel()
+            return 0
+        if not engine.open_search():
+            print("ERRORE: ricerca base non avviata / anteprima non rilevata")
+            engine.close_army_panel()
+            return 1
+        try:
+            loot = engine.read_loot()
+            decision = evaluate_loot_from_config(engine.config.loot, loot)
+            print("\n== ANTEPRIMA BASE (Available Loot) ==")
+            print(f"  oro={loot.gold} elisir={loot.elixir} dark={loot.dark}")
+            for note in loot.notes:
+                print(f"  nota: {note}")
+            print(f"  decisione: {'ATTACCA' if decision.should_attack else 'SALTA'} · {decision.reason}")
+            print(f"  score={decision.score:.0f}")
+            print("\nNessun deploy: torno in home con 'End Battle' (nessuna spesa oltre la ricerca).")
+        finally:
+            engine.end_battle()
+        hud = engine.read_hud(engine.grab())
+        print(f"HUD dopo: {hud}")
+        return 0
+    except AttackEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cocbot",
@@ -557,6 +602,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attack_scan.add_argument("--config", default="config/config.example.yaml")
     attack_scan.set_defaults(func=cmd_attack_scan)
+
+    attack_scout = sub.add_parser(
+        "attack-scout",
+        help="anteprima base: rileva loot e torna in home senza deploy (dry-run; --allow-spend)",
+    )
+    attack_scout.add_argument("--config", default="config/config.example.yaml")
+    attack_scout.add_argument(
+        "--allow-spend",
+        action="store_true",
+        help="avvia davvero la ricerca base (~1100 oro); senza questo flag e' un dry-run",
+    )
+    attack_scout.set_defaults(func=cmd_attack_scout)
 
     return parser
 

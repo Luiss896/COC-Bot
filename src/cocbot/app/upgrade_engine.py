@@ -837,6 +837,12 @@ class UpgradeEngine:
                 point = ui.find_battle_menu_close(image)
             elif state is ScreenState.ARMY_REVIEW:
                 point = ui.find_army_panel_close(image)
+            elif state is ScreenState.PREVIEW:
+                end_battle = ui.find_end_battle_button(image)
+                point = ui.center(end_battle) if end_battle is not None else None
+            elif state is ScreenState.BATTLE:
+                self.log("recover: battaglia in corso, nessuna azione automatica")
+                return False
             elif state is ScreenState.BUILD_MENU:
                 point = ui.find_menu_close(image)
             elif state is ScreenState.MAINTENANCE:

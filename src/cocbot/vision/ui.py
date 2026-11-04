@@ -199,6 +199,66 @@ def find_attack_button(image: np.ndarray) -> Rect | None:
 
 
 # ---------------------------------------------------------------------------
+# Anteprima base / battaglia: "End Battle" (rosso, basso a sinistra), "Next" (arancione, basso
+# a destra), pannello "Available Loot" (in alto a sinistra). Misure live 4 nov (1733x975):
+# End Battle centro (0,059 W, 0,790 H) 165x51 px; Next centro ~(0,93 W, 0,73 H); loot
+# (oro/elisir/dark) nella regione in alto a sinistra.
+# ---------------------------------------------------------------------------
+BATTLE_END_BATTLE_REGION = (0.0, 0.68, 0.35, 0.20)  # (x, y, w, h) frazioni
+BATTLE_NEXT_REGION = (0.80, 0.66, 0.20, 0.16)
+LOOT_REGION = (0.00, 0.10, 0.18, 0.14)  # "Available Loot": 3 importi (oro, elisir, dark)
+
+
+def find_end_battle_button(image: np.ndarray) -> Rect | None:
+    """Riquadro del pulsante rosso "End Battle" (anteprima/battaglia), o ``None``."""
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * BATTLE_END_BATTLE_REGION[0])
+    y0 = int(h * BATTLE_END_BATTLE_REGION[1])
+    x1 = int(w * (BATTLE_END_BATTLE_REGION[0] + BATTLE_END_BATTLE_REGION[2]))
+    y1 = int(h * (BATTLE_END_BATTLE_REGION[1] + BATTLE_END_BATTLE_REGION[3]))
+    for component in _red_components(image):
+        _area, cx, cy, _x, _y, cw, ch = component
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+            continue
+        if cw < 0.05 * w or ch < 0.03 * h:
+            continue
+        if cw / max(1, ch) < 2.0:  # pulsante largo e basso
+            continue
+        return _rect_from_component(component)
+    return None
+
+
+def find_next_button(image: np.ndarray) -> Rect | None:
+    """Riquadro del pulsante arancione "Next" (salta base) nell'anteprima, o ``None``."""
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * BATTLE_NEXT_REGION[0])
+    y0 = int(h * BATTLE_NEXT_REGION[1])
+    x1 = int(w * (BATTLE_NEXT_REGION[0] + BATTLE_NEXT_REGION[2]))
+    y1 = int(h * (BATTLE_NEXT_REGION[1] + BATTLE_NEXT_REGION[3]))
+    for component in _yellow_components(image):
+        _area, cx, cy, _x, _y, cw, ch = component
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+            continue
+        if cw < 0.08 * w or ch < 0.04 * h:
+            continue
+        if cw / max(1, ch) < 2.0:
+            continue
+        return _rect_from_component(component)
+    return None
+
+
+def loot_region(image: np.ndarray) -> Rect:
+    """Riquadro (frame) del pannello "Available Loot" nell'anteprima base."""
+    h, w = image.shape[:2]
+    x, y, width, height = LOOT_REGION
+    return Rect(int(x * w), int(y * h), int(width * w), int(height * h))
+
+
+# ---------------------------------------------------------------------------
 # Manutenzione del gioco ("MAINTENANCE BREAK"): banner a strisce gialle in alto.
 # ---------------------------------------------------------------------------
 MAINTENANCE_BANNER_HEIGHT = 0.075  # fascia alta (frazione H) con le strisce gialle

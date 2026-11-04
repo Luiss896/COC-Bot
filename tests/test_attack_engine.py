@@ -13,6 +13,16 @@ FULLSCREEN_DATASET = Path(__file__).resolve().parents[1] / "dataset" / "raw-2026
 _HAS_DATASET = (FULLSCREEN_DATASET / "03_battle_menu.png").is_file()
 dataset = pytest.mark.skipif(not _HAS_DATASET, reason="dataset locale assente (screenshot gitignored)")
 
+BUILD_DATASET = Path(__file__).resolve().parents[1] / "dataset" / "build-win-20261103"
+_HAS_SCOUT = (BUILD_DATASET / "scout-screen-window.png").is_file()
+scout_dataset = pytest.mark.skipif(not _HAS_SCOUT, reason="frame scout locale assente (gitignored)")
+
+
+def _load_build(name: str) -> np.ndarray:
+    image = cv2.imread(str(BUILD_DATASET / name))
+    assert image is not None, f"frame assente: {name}"
+    return image
+
 
 def _load(name: str) -> np.ndarray:
     image = cv2.imread(str(FULLSCREEN_DATASET / name))
@@ -143,6 +153,75 @@ def test_battle_menu_close_point_geometry() -> None:
     h, w = image.shape[:2]
     assert 0.96 < point[0] / w <= 1.0
     assert 0 <= point[1] / h < 0.06
+
+
+def test_parse_loot_items_pure() -> None:
+    from cocbot.app.attack_engine import parse_loot_items
+    from cocbot.vision.ocr import TextItem
+
+    def item(text: str, cy: int) -> TextItem:
+        return TextItem(text=text, x0=0, y0=cy, x1=10, y1=cy + 10, score=0.9)
+
+    items = [
+        item("Available Loot:", 10),
+        item("225 713", 50),
+        item("170 241", 90),
+        item("3 313", 130),
+    ]
+    preview = parse_loot_items(items)
+    assert (preview.gold, preview.elixir, preview.dark) == (225_713, 170_241, 3_313)
+    assert preview.notes == ()
+    empty = parse_loot_items([item("niente", 10)])
+    assert empty.gold is None
+    assert empty.notes
+
+
+def test_evaluate_loot_from_config() -> None:
+    from cocbot.app.attack_engine import LootPreview, evaluate_loot_from_config
+    from cocbot.config.models import Config
+
+    loot = Config().loot
+    decision = evaluate_loot_from_config(loot, LootPreview(gold=400_000, elixir=400_000, dark=3_000))
+    assert decision.should_attack
+    low = evaluate_loot_from_config(loot, LootPreview(gold=100_000, elixir=100_000, dark=100))
+    assert not low.should_attack
+
+
+@scout_dataset
+def test_scout_screen_frame_and_buttons() -> None:
+    """Frame live dell'anteprima base: stato PREVIEW, End Battle e Next riconosciuti."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    image = _load_build("scout-screen-window.png")
+    assert states.classify(image) is ScreenState.PREVIEW
+    end = ui.find_end_battle_button(image)
+    assert end is not None
+    h, w = image.shape[:2]
+    assert (end.x + end.w / 2) / w < 0.30
+    next_button = ui.find_next_button(image)
+    assert next_button is not None
+    assert (next_button.x + next_button.w / 2) / w > 0.80
+    # nessun falso positivo fuori dall'anteprima
+    assert ui.find_end_battle_button(_load_build("home-after-panels.png")) is None
+    assert ui.find_next_button(_load_build("battle-menu-window.png")) is None
+
+
+@scout_dataset
+def test_scout_loot_ocr_real_frame() -> None:
+    """OCR del bottino sul frame reale dell'anteprima: oro/elisir/dark esatti."""
+    from cocbot.app.attack_engine import parse_loot_items
+    from cocbot.vision import ocr, ui
+
+    image = _load_build("scout-screen-window.png")
+    region = ui.loot_region(image)
+    items = ocr.read_texts(
+        image[region.y : region.bottom, region.x : region.right],
+        offset=(region.x, region.y),
+    )
+    preview = parse_loot_items(items)
+    assert (preview.gold, preview.elixir, preview.dark) == (225_713, 170_241, 3_313)
+    assert preview.notes == ()
 
 
 @dataset

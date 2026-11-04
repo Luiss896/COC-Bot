@@ -1,16 +1,16 @@
-"""Engine del loop attacco (auto-battaglia): **v1 = menu Battle in sola lettura**.
+"""Engine del loop attacco (auto-battaglia): menu Battle, anteprima esercito e anteprima base.
 
-Prima di lanciare raid reali servono frame reali di anteprima/battaglia per loot OCR, skip e
-deploy; questa v1:
-1. apre il menu Battle dalla home (pulsante Battle) e verifica lo stato;
-2. localizza il pulsante "Find a Match" (geometria/cromia, senza OCR);
-3. valuta il bottino con una funzione **pura** testabile off-line (:func:`evaluate_loot`);
-4. chiude il menu e torna in home con chiusure sicure (ESC via messaggio, fallback navigazione).
+Stato attuale (validato live 4 nov 2026):
+1. apre il menu Battle dalla home e localizza "Find a Match" (geometria, senza OCR);
+2. "Find a Match" -> pannello **My Army** (`ARMY_REVIEW`): X rossa per chiudere, pulsante verde
+   "Attack!" che avvia la **ricerca base a pagamento** (~1100 oro);
+3. "Attack!" -> **anteprima base** (`PREVIEW`): bottino disponibile (oro/elisir/dark), pulsante
+   "Next" (salta base, ~1100 oro) e "End Battle" (torna in home senza deployare);
+4. `evaluate_loot` (pura) decide se la base merita l'attacco; `SkipSession` limita skip/timeout.
 
-Non preme **mai** "Find a Match": nessun raid, nessuna spesa, nessuna battaglia. Skip ed
-esecuzione del raid verranno aggiunti dopo la validazione dei frame reali di anteprima.
-
-Eredita da ``UpgradeEngine`` la navigazione prudente (X di menu/dialogo, mai tap sulla mappa).
+**Non deploya e non attacca**: il deploy (dragon spam) e la gestione esiti verranno aggiunti dopo
+la validazione dei frame di battaglia. Le azioni che spendono oro (Attack!, Next) sono esplicite
+e non automatiche.
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from dataclasses import dataclass
 
 from cocbot.app.upgrade_engine import UpgradeEngine, UpgradeEngineError
 from cocbot.core.types import Rect, ScreenState
-from cocbot.vision import states, ui
+from cocbot.vision import ocr as ocr_module
+from cocbot.vision import states, textparse, ui
 
 VK_ESCAPE = 0x1B
 
@@ -94,6 +95,53 @@ class BattleMenuRead:
     notes: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class LootPreview:
+    """Bottino disponibile letto dall'anteprima base (pannello ``Available Loot``)."""
+
+    gold: int | None
+    elixir: int | None
+    dark: int | None
+    notes: tuple[str, ...] = ()
+
+
+def parse_loot_items(items) -> LootPreview:
+    """Estrae oro/elisir/dark dai testi OCR del pannello "Available Loot".
+
+    I tre importi compaiono in quest'ordine dall'alto (oro, elisir, elisir nero); gli altri
+    testi (nome giocatore, etichetta) non sono numeri e vengono ignorati. Funzione pura.
+    """
+    amounts: list[tuple[int, int]] = []
+    for item in items:
+        amount = textparse.parse_amount(item.text)
+        if amount is not None:
+            amounts.append((item.cy, amount))
+    amounts.sort()
+    values = [amount for _cy, amount in amounts]
+    notes: list[str] = []
+    if len(values) < 3:
+        notes.append(f"loot: letti {len(values)} valori su 3")
+    gold, elixir, dark = (values + [None, None, None])[:3]
+    return LootPreview(gold=gold, elixir=elixir, dark=dark, notes=tuple(notes))
+
+
+def evaluate_loot_from_config(loot, preview: LootPreview) -> LootDecision:
+    """Applica la policy loot della config (``loot.thresholds`` + ``loot.weights``)."""
+    thresholds = {
+        "gold_min": loot.thresholds.gold_min,
+        "elixir_min": loot.thresholds.elixir_min,
+        "dark_min": loot.thresholds.dark_min,
+        "score_min": loot.thresholds.score_min,
+    }
+    return evaluate_loot(
+        preview.gold,
+        preview.elixir,
+        preview.dark,
+        thresholds=thresholds,
+        weights=loot.weights,
+    )
+
+
 @dataclass
 class SkipSession:
     """Contatore e timer degli skip durante la ricerca della base (config ``loot.*``).
@@ -130,7 +178,7 @@ class SkipSession:
 
 
 class AttackEngine(UpgradeEngine):
-    """Engine del loop attacco: v1 apre/legge/chiude il menu Battle, senza combattere."""
+    """Engine del loop attacco: menu Battle, anteprima esercito, anteprima base e skip."""
 
     # ------------------------------------------------------------------ menu Battle
     def open_battle_menu(self) -> bool:
@@ -213,6 +261,70 @@ class AttackEngine(UpgradeEngine):
             return True
         return self.recover_home()
 
+    # ------------------------------------------------------------------ anteprima base
+    def read_loot(self) -> LootPreview:
+        """Legge oro/elisir/dark del pannello "Available Loot" (OCR ~0,9 s)."""
+        image = self.grab()
+        region = ui.loot_region(image)
+        items = ocr_module.read_texts(
+            image[region.y : region.bottom, region.x : region.right],
+            offset=(region.x, region.y),
+        )
+        preview = parse_loot_items(items)
+        if preview.notes:
+            self.log(f"read_loot: {', '.join(preview.notes)}")
+        return preview
+
+    def open_search(self, *, timeout_s: float = 25.0) -> bool:
+        """Da home: menu Battle -> Find a Match -> My Army -> "Attack!" -> anteprima base.
+
+        Se il pannello "My Army" e' gia' aperto riusa quello (evita un giro inutile).
+        **Spende ~1100 oro** (costo della ricerca base): usare solo con autorizzazione esplicita.
+        """
+        state = states.classify(self.grab())
+        if state is not ScreenState.ARMY_REVIEW and not self.open_army_panel():
+            return False
+        image = self.grab()
+        attack = ui.find_attack_button(image)
+        if attack is None:
+            self.log("open_search: pulsante 'Attack!' non trovato")
+            return False
+        self.log("open_search: premo 'Attack!' (avvia la ricerca base, ~1100 oro)")
+        self._tap(ui.center(attack), wait_s=0.5)
+        frame = self._wait_state(ScreenState.PREVIEW, timeout_s=timeout_s)
+        if frame is None:
+            self.log("open_search: anteprima base non rilevata")
+            return False
+        return True
+
+    def next_base(self, *, timeout_s: float = 25.0) -> bool:
+        """Salta alla base successiva con "Next" (**spende ~1100 oro**)."""
+        image = self.grab()
+        button = ui.find_next_button(image)
+        if button is None:
+            self.log("next_base: pulsante Next non trovato")
+            return False
+        self.log("next_base: premo 'Next' (~1100 oro)")
+        self._tap(ui.center(button), wait_s=0.5)
+        return self._wait_state(ScreenState.PREVIEW, timeout_s=timeout_s) is not None
+
+    def end_battle(self) -> bool:
+        """Torna in home dall'anteprima base con "End Battle" (nessun deploy)."""
+        image = self.grab()
+        state = states.classify(image)
+        if state is ScreenState.HOME:
+            return True
+        button = ui.find_end_battle_button(image)
+        if button is None:
+            self.log(f"end_battle: pulsante End Battle non trovato (stato {state.value})")
+            return self.recover_home()
+        self.log("end_battle: premo 'End Battle' (nessun deploy)")
+        self._tap(ui.center(button), wait_s=1.2)
+        if self._wait_state(ScreenState.HOME, timeout_s=8.0) is not None:
+            return True
+        self.log("end_battle: home non raggiunta, uso recover_home")
+        return self.recover_home()
+
     def scan_battle_menu(self) -> BattleMenuRead:
         """Apre il menu Battle, legge gli elementi principali e torna in home (sola lettura)."""
         notes: list[str] = []
@@ -241,6 +353,9 @@ __all__ = [
     "BattleMenuRead",
     "DEFAULT_WEIGHTS",
     "LootDecision",
+    "LootPreview",
     "SkipSession",
     "evaluate_loot",
+    "evaluate_loot_from_config",
+    "parse_loot_items",
 ]
