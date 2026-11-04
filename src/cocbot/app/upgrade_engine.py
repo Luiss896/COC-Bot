@@ -606,7 +606,11 @@ class UpgradeEngine:
         return False
 
     def grab(self) -> np.ndarray:
-        """Frame corrente (client-cropped). Errore se la finestra e' minimizzata/nera."""
+        """Frame corrente (client-cropped). Errore se la finestra e' minimizzata/nera.
+
+        Il primo frame di una sessione WGC puo' essere nero (artefatto transitorio): si
+        riprova brevemente prima di dichiarare la finestra inutilizzabile.
+        """
         info = find_game_window()
         if info is None:
             raise UpgradeEngineError("finestra di gioco non trovata")
@@ -614,13 +618,13 @@ class UpgradeEngine:
             self._rebind_window(info)
         if win32.is_minimized(info.hwnd):
             raise UpgradeEngineError("finestra del gioco minimizzata")
-        frame = self.source.grab()
-        image = frame.image
-        if image is None or image.size == 0:
-            raise UpgradeEngineError("frame di gioco non disponibile")
-        if frame.metadata.get("black"):
-            raise UpgradeEngineError("frame nero: la finestra del gioco e' minimizzata o coperta in modo anomalo")
-        return image
+        for _attempt in range(3):
+            frame = self.source.grab()
+            image = frame.image
+            if image is not None and image.size > 0 and not frame.metadata.get("black"):
+                return image
+            time.sleep(0.3)
+        raise UpgradeEngineError("frame nero: la finestra del gioco e' minimizzata o coperta in modo anomalo")
 
     # ------------------------------------------------------------------ reload/attesa
     def wait_for_load(self, *, timeout_s: float = 200.0, poll_s: float = 2.0) -> bool:
@@ -823,6 +827,8 @@ class UpgradeEngine:
                 point = ui.find_dialog_close(image)
             elif state is ScreenState.PLACEMENT:
                 point = ui.find_placement_exit(image)
+            elif state is ScreenState.BATTLE_MENU:
+                point = ui.find_battle_menu_close(image)
             elif state is ScreenState.BUILD_MENU:
                 point = ui.find_menu_close(image)
             elif state is ScreenState.MAINTENANCE:

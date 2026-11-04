@@ -155,14 +155,28 @@ class AttackEngine(UpgradeEngine):
         return True
 
     def close_battle_menu(self) -> bool:
-        """Chiude il menu Battle e torna in home (ESC via messaggio; fallback sicuro)."""
-        if states.classify(self.grab()) is ScreenState.HOME:
+        """Chiude il menu Battle e torna in home (tap target in alto a destra; ESC fallback).
+
+        Il menu Battle di questa versione non ha una X visibile: la chiusura e' un'area
+        cliccabile invisibile nell'angolo in alto a destra (validata a runtime il 4 nov).
+        """
+        image = self.grab()
+        state = states.classify(image)
+        if state is ScreenState.HOME:
             return True
-        self.log("close_battle_menu: provo ESC (messaggio Win32, nessun focus)")
+        if state is not ScreenState.BATTLE_MENU:
+            self.log(f"close_battle_menu: stato {state.value}, uso recover_home")
+            return self.recover_home()
+        point = ui.find_battle_menu_close(image)
+        if point is not None:
+            self.log(f"close_battle_menu: tap di chiusura in alto a destra @ {point}")
+            self.sink.tap_pixels(*point)
+            if self._wait_state(ScreenState.HOME, timeout_s=4.0) is not None:
+                return True
+        self.log("close_battle_menu: tap di chiusura non sufficiente, provo ESC (messaggio)")
         self.sink.key(VK_ESCAPE)
-        if self._wait_state(ScreenState.HOME, timeout_s=3.0) is not None:
+        if self._wait_state(ScreenState.HOME, timeout_s=2.0) is not None:
             return True
-        self.log("close_battle_menu: ESC non sufficiente, fallback a recover_home")
         return self.recover_home()
 
     def scan_battle_menu(self) -> BattleMenuRead:

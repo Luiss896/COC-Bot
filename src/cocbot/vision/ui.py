@@ -136,6 +136,24 @@ def find_find_match_button(image: np.ndarray) -> Rect | None:
     return None
 
 
+BATTLE_CLOSE_POINT_FRACTION = (0.986, 0.025)  # area di chiusura (hit area invisibile) in alto a dx
+
+
+def find_battle_menu_close(image: np.ndarray) -> tuple[int, int] | None:
+    """Punto per chiudere il menu Battle: hit area invisibile in alto a destra.
+
+    Nel menu Battle non c'e' una X visibile: la chiusura e' un tap target trasparente
+    nell'angolo in alto a destra (verificato live il 4 nov: tap a (0,986 W, 0,025 H) -> home;
+    ESC via messaggio e SendInput invece NON chiudono). Il punto viene restituito **solo** se
+    il frame e' davvero il menu Battle (pulsante "Find a Match" presente), cosi' non si tocca
+    l'angolo della home (zona gemme/GemGuard).
+    """
+    if find_find_match_button(image) is None:
+        return None
+    h, w = image.shape[:2]
+    return int(round(w * BATTLE_CLOSE_POINT_FRACTION[0])), int(round(h * BATTLE_CLOSE_POINT_FRACTION[1]))
+
+
 # ---------------------------------------------------------------------------
 # Manutenzione del gioco ("MAINTENANCE BREAK"): banner a strisce gialle in alto.
 # ---------------------------------------------------------------------------

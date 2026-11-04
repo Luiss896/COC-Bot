@@ -133,6 +133,19 @@ def test_find_match_absent_outside_battle_menu() -> None:
 
 
 @dataset
+def test_battle_menu_close_point_geometry() -> None:
+    """Il punto di chiusura del menu Battle e' l'angolo in alto a destra (hit area invisibile)."""
+    from cocbot.vision import ui
+
+    image = _load("03_battle_menu.png")
+    point = ui.find_battle_menu_close(image)
+    assert point is not None
+    h, w = image.shape[:2]
+    assert 0.96 < point[0] / w <= 1.0
+    assert 0 <= point[1] / h < 0.06
+
+
+@dataset
 def test_home_frame_still_classified_home() -> None:
     from cocbot.core.types import ScreenState
     from cocbot.vision import states

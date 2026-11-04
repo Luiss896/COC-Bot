@@ -163,6 +163,24 @@ def test_maintenance_break_real_frame() -> None:
         assert not ui.find_maintenance_banner(_load(other)), other
 
 
+def test_battle_menu_window_real_frame() -> None:
+    """Frame live windowed del menu Battle: stato, pulsante "Find a Match" e punto di chiusura."""
+    from cocbot.core.types import ScreenState
+    from cocbot.vision import states, ui
+
+    frame = _load("battle-menu-window.png")
+    assert states.classify(frame) is ScreenState.BATTLE_MENU
+    assert ui.find_find_match_button(frame) is not None
+    point = ui.find_battle_menu_close(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.96 < point[0] / w <= 1.0
+    assert 0 <= point[1] / h < 0.06
+    # il punto di chiusura NON deve esistere fuori dal menu Battle (home/angolo gemme)
+    assert ui.find_battle_menu_close(_load("home-after-panels.png")) is None
+    assert ui.find_battle_menu_close(_load("build-menu-top.png")) is None
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 
