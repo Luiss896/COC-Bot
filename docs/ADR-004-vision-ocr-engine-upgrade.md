@@ -197,3 +197,6 @@
 - **GUI tkinter**: aggiunto pannello **Attacco** (dry-run raid/scout loot/raid reale con opzioni
   ricerche max, spell, eroi, cap storage) che esegue le CLI `attack-*` in un thread e ne riversa
   l'output nel log; pulsanti disabilitati durante l'esecuzione o col bot attivo. Selftest GUI ok.
+- **Dataset locale esteso (27 frame)**: aggiunti pannello **Supercell ID / My Profile / Join Clan**
+  (aperti dal badge in home ~0,047 W / 0,047 H, chiusi con X a ~0,842 W / 0,116 H), anteprima dopo
+  "Next", fase battaglia, risultati con bottino e schermata di vittoria.
