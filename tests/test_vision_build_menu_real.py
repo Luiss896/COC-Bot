@@ -203,6 +203,32 @@ def test_army_review_window_real_frame() -> None:
     assert ui.find_army_panel_close(_load("battle-menu-window.png")) is None
 
 
+def test_news_window_real_frame_and_close() -> None:
+    """Frame live della schermata News (aperta da ">>"): X rossa rilevata in alto a destra."""
+    from cocbot.vision import ui
+
+    frame = _load("news-window.png")
+    point = ui.find_dialog_close(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.90 < point[0] / w < 0.99
+    assert 0.02 < point[1] / h < 0.12
+    # la X del menu Build (0,98 W) non deve essere confusa con quella dei dialoghi
+    assert ui.find_menu_close(frame) is None
+
+
+def test_events_panel_real_frame_and_close() -> None:
+    """Frame live del pannello Events: X rossa rilevata (bordo del pannello a ~0,82 W)."""
+    from cocbot.vision import ui
+
+    frame = _load("events-panel.png")
+    point = ui.find_dialog_close(frame)
+    assert point is not None
+    h, w = frame.shape[:2]
+    assert 0.78 < point[0] / w < 0.88
+    assert 0.02 < point[1] / h < 0.12
+
+
 def test_read_wall_panel() -> None:
     from cocbot.vision import build_menu
 

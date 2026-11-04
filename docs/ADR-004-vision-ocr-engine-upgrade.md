@@ -195,8 +195,12 @@
 - Scelta del target: risorse **già al cap** (oro/elisir 10 000 000) → l'upgrade usa risorse che
   sarebbero comunque state sprecate; spesa piccola e tracciata (600 000 elisir).
 - **GUI tkinter**: aggiunto pannello **Attacco** (dry-run raid/scout loot/raid reale con opzioni
-  ricerche max, spell, eroi, cap storage) che esegue le CLI `attack-*` in un thread e ne riversa
+  ricerche max, spell, eroi, cap storage) e pannello **Planner** (scansione+piano dry-run; esecuzione
+  target `--only` con dialog di conferma spesa) che eseguono le CLI in un thread e ne riversano
   l'output nel log; pulsanti disabilitati durante l'esecuzione o col bot attivo. Selftest GUI ok.
-- **Dataset locale esteso (27 frame)**: aggiunti pannello **Supercell ID / My Profile / Join Clan**
-  (aperti dal badge in home ~0,047 W / 0,047 H, chiusi con X a ~0,842 W / 0,116 H), anteprima dopo
-  "Next", fase battaglia, risultati con bottino e schermata di vittoria.
+- **Dataset locale esteso (29 frame)**: aggiunti pannello **Supercell ID / My Profile / Join Clan**
+  (badge in home ~0,047 W / 0,047 H, chiusi con X a ~0,842 W / 0,116 H), anteprima dopo "Next",
+  fase battaglia, risultati con bottino, vittoria, **News** (tasto ">>" ~0,235 W / 0,925 H, X a
+  ~0,947 W / 0,059 H) ed **Events** (calendario ~0,19 W / 0,925 H, X a ~0,819 W / 0,072 H).
+- **X dei pannelli/dialoghi**: `find_dialog_close` copre ora la fascia 0,80–0,955 W / 0,03–0,13 H
+  (dialoghi upgrade, News, Events, Supercell ID); la X del menu resta a ~0,98 W.

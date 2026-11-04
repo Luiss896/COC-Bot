@@ -427,17 +427,17 @@ def find_menu_close(image: np.ndarray) -> tuple[int, int] | None:
 
 
 def find_dialog_close(image: np.ndarray) -> tuple[int, int] | None:
-    """Centro della X di un dialogo centrale (conferma upgrade), o ``None``.
+    """Centro della X di un dialogo/pannello centrale (conferma upgrade, News, ecc.), o ``None``.
 
-    La X del dialogo sta a ~0.88 della larghezza e ~0.08 dell'altezza: posizione
-    distinta sia dalla X del menu (~0.98, ~0.03) sia dai pulsanti della mappa.
+    La X dei dialoghi centrali sta a ~0.82-0.95 della larghezza e ~0.03-0.13 dell'altezza:
+    posizione distinta sia dalla X del menu (~0.98, ~0.03) sia dai pulsanti della mappa.
     """
     if not _valid(image):
         return None
     h, w = image.shape[:2]
     for component in _red_components(image):
         _area, cx, cy = component[0], component[1], component[2]
-        if 0.835 * w < cx < 0.945 * w and 0.040 * h < cy < 0.120 * h:
+        if 0.80 * w < cx < 0.955 * w and 0.030 * h < cy < 0.130 * h:
             return cx, cy
     return None
 

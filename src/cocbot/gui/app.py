@@ -16,7 +16,7 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import scrolledtext, ttk
+from tkinter import messagebox, scrolledtext, ttk
 
 from cocbot.app.controller import BotController, BotState
 from cocbot.config import load_config
@@ -72,8 +72,8 @@ def run_gui(
 
     root = tk.Tk()
     root.title("cocbot — automazione Clash of Clans (uso didattico, viola i ToS)")
-    root.geometry("660x580")
-    root.minsize(600, 520)
+    root.geometry("660x660")
+    root.minsize(600, 580)
 
     main = ttk.Frame(root, padding=10)
     main.pack(fill="both", expand=True)
@@ -126,7 +126,26 @@ def run_gui(
     attack_var = tk.StringVar(value="attacco: idle")
     ttk.Label(attack_frame, textvariable=attack_var, foreground="#555").pack(anchor="w")
 
-    log_box = scrolledtext.ScrolledText(main, height=14, state="disabled", wrap="word")
+    # --- pannello planner upgrade (CLI in thread, output nel log) -----------------
+    planner_frame = ttk.LabelFrame(main, text="Planner upgrade (dry-run di default)")
+    planner_frame.pack(fill="x", pady=(0, 6))
+    planner_options = ttk.Frame(planner_frame)
+    planner_options.pack(fill="x", pady=(2, 2))
+    target_var = tk.StringVar(value="")
+    ttk.Label(planner_options, text="target (--only):").pack(side="left")
+    ttk.Entry(planner_options, textvariable=target_var, width=24).pack(
+        side="left", padx=(2, 8)
+    )
+    planner_buttons_row = ttk.Frame(planner_frame)
+    planner_buttons_row.pack(fill="x", pady=(2, 2))
+    plan_button = ttk.Button(planner_buttons_row, text="Scansiona + piano (dry-run)")
+    exec_button = ttk.Button(planner_buttons_row, text="Esegui target (spende)")
+    for button in (plan_button, exec_button):
+        button.pack(side="left", padx=(0, 6))
+    planner_var = tk.StringVar(value="planner: idle")
+    ttk.Label(planner_frame, textvariable=planner_var, foreground="#555").pack(anchor="w")
+
+    log_box = scrolledtext.ScrolledText(main, height=12, state="disabled", wrap="word")
     log_box.pack(fill="both", expand=True)
 
     def append_log(message: str) -> None:
@@ -135,24 +154,25 @@ def run_gui(
         log_box.see("end")
         log_box.configure(state="disabled")
 
-    attack_state: dict[str, bool] = {"running": False}
-    attack_buttons = (dry_button, scout_button, raid_button)
+    task_state: dict[str, bool] = {"running": False}
+    task_buttons = (dry_button, scout_button, raid_button, plan_button, exec_button)
 
-    def sync_attack_buttons() -> None:
+    def sync_task_buttons() -> None:
         bot_running = controller.snapshot().state == BotState.RUNNING
-        enabled = not attack_state["running"] and not bot_running
-        for button in attack_buttons:
+        enabled = not task_state["running"] and not bot_running
+        for button in task_buttons:
             button.configure(state="normal" if enabled else "disabled")
 
-    def start_attack_cli(extra: list[str], label: str) -> None:
-        if attack_state["running"]:
-            append_log("attacco: comando già in esecuzione")
+    def start_task_cli(extra: list[str], label: str, status_var: tk.StringVar) -> None:
+        if task_state["running"]:
+            append_log(f"task: '{task_state_name['label']}' già in esecuzione")
             return
-        attack_state["running"] = True
-        sync_attack_buttons()
-        attack_var.set(f"attacco: {label} in corso…")
+        task_state["running"] = True
+        task_state_name["label"] = label
+        sync_task_buttons()
+        status_var.set(f"{label} in corso…")
         command = [sys.executable, "-m", "cocbot", *extra]
-        append_log(f"attacco: avvio {label}: {' '.join(command[2:])}")
+        append_log(f"task: avvio {label}: {' '.join(command[2:])}")
 
         def worker() -> None:
             exit_code = -1
@@ -171,18 +191,20 @@ def run_gui(
                     log_queue.put(line.rstrip())
                 exit_code = process.wait()
             except OSError as exc:
-                log_queue.put(f"attacco: errore avvio: {exc}")
+                log_queue.put(f"task: errore avvio: {exc}")
             finally:
 
                 def finish() -> None:
-                    attack_state["running"] = False
-                    attack_var.set(f"attacco: {label} terminato (exit {exit_code})")
-                    log_queue.put(f"attacco: {label} terminato (exit {exit_code})")
-                    sync_attack_buttons()
+                    task_state["running"] = False
+                    status_var.set(f"{label} terminato (exit {exit_code})")
+                    log_queue.put(f"task: {label} terminato (exit {exit_code})")
+                    sync_task_buttons()
 
                 root.after(0, finish)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    task_state_name: dict[str, str] = {"label": ""}
 
     def raid_args() -> list[str]:
         arguments = [
@@ -199,17 +221,45 @@ def run_gui(
             arguments.append("--ignore-caps")
         return arguments
 
-    dry_button.configure(command=lambda: start_attack_cli(["attack-run"], "raid dry-run"))
-    scout_button.configure(
-        command=lambda: start_attack_cli(["attack-scout", "--allow-spend"], "scout loot")
+    def run_planner_execute() -> None:
+        target = target_var.get().strip()
+        if not target:
+            append_log("planner: indica un target (--only) per l'esecuzione")
+            return
+        confirm = messagebox.askyesno(
+            "Conferma spesa",
+            f"Eseguire davvero l'upgrade di '{target}'?\n\nQuesta azione SPENDE risorse.",
+        )
+        if not confirm:
+            append_log("planner: esecuzione annullata")
+            return
+        start_task_cli(
+            ["upgrade-run", "--execute", "--only", target],
+            f"upgrade '{target}'",
+            planner_var,
+        )
+
+    dry_button.configure(
+        command=lambda: start_task_cli(["attack-run"], "raid dry-run", attack_var)
     )
-    raid_button.configure(command=lambda: start_attack_cli(raid_args(), "raid reale"))
-    sync_attack_buttons()
+    scout_button.configure(
+        command=lambda: start_task_cli(
+            ["attack-scout", "--allow-spend"], "scout loot", attack_var
+        )
+    )
+    raid_button.configure(
+        command=lambda: start_task_cli(raid_args(), "raid reale", attack_var)
+    )
+    plan_button.configure(
+        command=lambda: start_task_cli(["upgrade-run"], "planner dry-run", planner_var)
+    )
+    exec_button.configure(command=run_planner_execute)
+    sync_task_buttons()
 
     def toggle_bot() -> None:
         running = controller.toggle()
         start_button.configure(text="Ferma bot" if running else "Avvia bot")
-        sync_attack_buttons()
+        sync_task_buttons()
 
     start_button.configure(command=toggle_bot)
 
