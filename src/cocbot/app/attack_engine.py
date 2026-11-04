@@ -23,8 +23,8 @@ import numpy as np
 from cocbot.app.upgrade_engine import UpgradeEngine, UpgradeEngineError
 from cocbot.capture import win32
 from cocbot.core.types import Rect, ScreenState
+from cocbot.vision import battle_result, states, textparse, ui
 from cocbot.vision import ocr as ocr_module
-from cocbot.vision import states, textparse, ui
 
 VK_ESCAPE = 0x1B
 
@@ -339,6 +339,123 @@ class AttackEngine(UpgradeEngine):
             self.log("wait_battle_start: battaglia non iniziata entro il timeout")
             return False
         return True
+
+    def read_battle_result(self) -> battle_result.BattleResult:
+        """Legge esito/danno/bottino/truppe dalla schermata risultati (stato BATTLE_END)."""
+        image = self.grab()
+        if states.classify(image) is not ScreenState.BATTLE_END:
+            self.log("read_battle_result: non sono nella schermata risultati")
+        return battle_result.read_result(image)
+
+    def _hud_text(self) -> str | None:
+        try:
+            return str(self.read_hud(self.grab()))
+        except AttackEngineError:
+            return None
+
+    def _finish_report(self, report: dict) -> dict:
+        report["hud_after"] = self._hud_text()
+        return report
+
+    def run_attack(
+        self,
+        *,
+        allow_spend: bool = False,
+        max_searches: int = 2,
+        dragons: int = 13,
+        heroes: bool = True,
+        battle_end_timeout_s: float = 240.0,
+    ) -> dict:
+        """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
+
+        ``allow_spend=False`` = **dry-run**: apre e richiude il pannello esercito senza spendere.
+        Con ``allow_spend=True`` ogni ricerca/"Next" costa ~1100 oro e ``max_searches`` limita il
+        numero totale di ricerche (= tetto di spesa ``max_searches * 1100`` oro circa).
+        Ritorna un report con ricerche/skip, bottini letti, decisione, esito e HUD prima/dopo.
+        """
+        report: dict = {
+            "dry_run": not allow_spend,
+            "searches": 0,
+            "skips": 0,
+            "loots": [],
+            "decision": None,
+            "attacked": False,
+            "result": None,
+            "action": None,
+            "hud_before": None,
+            "hud_after": None,
+        }
+        if not self.open_battle_menu():
+            raise AttackEngineError("menu Battle non apribile")
+        if not allow_spend:
+            if not self.open_army_panel():
+                raise AttackEngineError("pannello My Army non apribile")
+            if not self.close_army_panel():
+                raise AttackEngineError("pannello My Army non chiudibile")
+            if not self.close_battle_menu():
+                raise AttackEngineError("menu Battle non chiudibile")
+            report["action"] = "dry_run"
+            return report
+        report["hud_before"] = self._hud_text()
+        try:
+            if not self.open_search():
+                raise AttackEngineError("ricerca base non avviata / anteprima non rilevata")
+            report["searches"] = 1
+            while True:
+                loot = self.read_loot()
+                report["loots"].append(
+                    {"gold": loot.gold, "elixir": loot.elixir, "dark": loot.dark}
+                )
+                decision = evaluate_loot_from_config(self.config.loot, loot)
+                report["decision"] = decision.reason
+                if decision.should_attack:
+                    break
+                if report["searches"] >= max_searches:
+                    report["action"] = "ended_bad_loot"
+                    self.end_battle()
+                    return self._finish_report(report)
+                if not self.next_base():
+                    self.log("run_attack: 'Next' non riuscito, esco con End Battle")
+                    report["action"] = "next_failed"
+                    self.end_battle()
+                    return self._finish_report(report)
+                report["searches"] += 1
+                report["skips"] += 1
+            if not self.wait_battle_start():
+                report["action"] = "battle_not_started"
+                self.end_battle()
+                return self._finish_report(report)
+            time.sleep(3.0)
+            battle = self.grab()
+            self.pan_camera(0.28, image=battle)
+            time.sleep(0.8)
+            report["deploy_taps"] = self.deploy_dragon_spam(
+                self.grab(), dragons=dragons, heroes=heroes
+            )
+            end_frame = self._wait_state(ScreenState.BATTLE_END, timeout_s=battle_end_timeout_s)
+            if end_frame is None:
+                report["action"] = "battle_end_timeout"
+                return self._finish_report(report)
+            result = self.read_battle_result()
+            report["result"] = {
+                "outcome": result.outcome,
+                "damage_pct": result.damage_pct,
+                "loot_gold": result.loot_gold,
+                "loot_elixir": result.loot_elixir,
+                "loot_dark": result.loot_dark,
+                "troops_expended": result.troops_expended,
+                "notes": list(result.notes),
+            }
+            report["attacked"] = True
+            report["action"] = "attacked"
+            self.return_home()
+            return self._finish_report(report)
+        finally:
+            state = states.classify(self.grab())
+            if state is ScreenState.PREVIEW:
+                self.end_battle()
+            elif state is ScreenState.BATTLE_END:
+                self.return_home()
 
     @staticmethod
     def _region_diff(first, second, region: Rect) -> float:

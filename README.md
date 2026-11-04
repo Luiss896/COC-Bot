@@ -57,7 +57,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Auto-reload disconnessione VALIDATO COMPLETO**: modal di rete → retry → reload (**4,9 s**) → **home** verificata su disconnessione reale da inattività (4 nov, nessuna spesa). Riconosce anche lo stato **`MAINTENANCE`** e va in pausa sicura senza input; ripristina la finestra se il reload la minimizza
 - [x] **Esecuzione reale upgrade edificio/eroe** (riga → dialogo CONFIRM): **validata a runtime** (Air Bomb e Barbarian King, vedi sopra); il livello mostrato dal catalogo è quello di destinazione, non quello attuale
 - [x] **Opzioni eroi per auto-battaglia**: `attack.use_heroes` + `attack.heroes_require_ready` (config, pronte per il loop attacco)
-- [x] **Loop attacco v5 VALIDATO LIVE end-to-end (raid VINTO)**: `attack-scan`, `ARMY_REVIEW`, `PREVIEW` (OCR loot + End Battle/Next), `BATTLE` (timer, barra truppe), `BATTLE_END` + Return Home. **Camera pan** via `PostMessage` per rivelare la zona deployabile; **deploy completo: 13 draghi + 2 eroi (AQ+GW)**; esito **VICTORY 1 stella** (15% danno), bottino 59 023 oro / 53 271 elisir / 1 296 dark (HUD +288 399 oro / +265 118 elisir / +6 326 dark); ricerche ~1 100 oro ciascuna; **gemme mai spese** (1 925). Da completare: skip reale, OCR esiti, spell
+- [x] **Loop attacco v6 VALIDATO LIVE end-to-end (raid VINTO + `attack-run`)**: `attack-scan`, `ARMY_REVIEW`, `PREVIEW` (OCR loot + End Battle/Next), `BATTLE`, **camera pan** (`PostMessage` drag), deploy **13 draghi + 2 eroi**, `BATTLE_END` + **OCR esiti** (`vision/battle_result.py`: Victory/Defeat, % danno, bottino, truppe) e Return Home. **CLI `attack-run`** (dry-run di default; `--allow-spend --max-searches N` = tetto di spesa). Live: raid **VINTO** (1 stella, 15%, bottino 59 023/53 271/1 296) e ciclo completo con esito letto dall'OCR (defeat 2%, 26 675/14 941/457); ricerche ~1 100 oro; **gemme mai spese** (1 925). Da completare: skip reale, spell, early-exit
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
 - [ ] Loop attacco completo (skip reale + deploy dragon spam affidabile + esiti)
 - [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
@@ -100,10 +100,12 @@ python tools/record_session.py            # output in dataset/raw-<data>/ con co
 # 10) backend ADB opzionale (se installi il Developer Emulator)
 python -m cocbot adb-check
 
-# 11) loop attacco: menu Battle (SOLA LETTURA) e anteprima base senza deploy
+# 11) loop attacco: menu Battle (SOLA LETTURA), anteprima base e ciclo completo
 python -m cocbot attack-scan
 python -m cocbot attack-scout                # dry-run: apre My Army e chiude (nessuna spesa)
 python -m cocbot attack-scout --allow-spend  # ricerca base (~1100 oro), legge loot, End Battle
+python -m cocbot attack-run                  # dry-run del ciclo completo (nessuna spesa)
+python -m cocbot attack-run --allow-spend --max-searches 2  # raid reale: ricerca/Next, deploy, esiti
 ```
 
 > `probe` è **solo lettura**. `capture`/`input-test` non rubano focus né muovono il cursore.

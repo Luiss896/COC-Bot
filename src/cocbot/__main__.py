@@ -516,6 +516,53 @@ def cmd_attack_scout(args: argparse.Namespace) -> int:
         engine.close()
 
 
+def cmd_attack_run(args: argparse.Namespace) -> int:
+    """Ciclo attacco completo: ricerca (skip se il loot non basta), deploy, esito, home.
+
+    Senza ``--allow-spend`` e' un dry-run (apre/chiude il pannello esercito, nessuna spesa).
+    Con ``--allow-spend`` ogni ricerca/"Next" costa ~1100 oro e ``--max-searches`` limita il
+    numero di ricerche (tetto di spesa). Deploy: ``--dragons`` draghi + eroi (``--no-heroes``).
+    """
+    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+
+    _, engine = _load_engine(args.config, AttackEngine)
+    try:
+        report = engine.run_attack(
+            allow_spend=args.allow_spend,
+            max_searches=max(1, args.max_searches),
+            dragons=max(1, args.dragons),
+            heroes=not args.no_heroes,
+        )
+        print("\n== ATTACK RUN ==")
+        print(f"  dry_run={report['dry_run']} azione={report['action']}")
+        print(f"  ricerche={report['searches']} skip={report['skips']}")
+        for index, loot in enumerate(report["loots"], start=1):
+            print(f"  loot {index}: oro={loot['gold']} elisir={loot['elixir']} dark={loot['dark']}")
+        if report.get("decision"):
+            print(f"  decisione: {report['decision']}")
+        if report.get("deploy_taps") is not None:
+            print(f"  tap deploy: {report['deploy_taps']}")
+        result = report.get("result")
+        if result:
+            print(
+                f"  esito: {result['outcome']} · danno={result['damage_pct']}% · "
+                f"bottino={result['loot_gold']}/{result['loot_elixir']}/{result['loot_dark']} · "
+                f"truppe={result['troops_expended']}"
+            )
+            for note in result["notes"]:
+                print(f"  nota: {note}")
+        if report.get("hud_before"):
+            print(f"  HUD prima: {report['hud_before']}")
+        if report.get("hud_after"):
+            print(f"  HUD dopo:  {report['hud_after']}")
+        return 0
+    except AttackEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    finally:
+        engine.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cocbot",
@@ -614,6 +661,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="avvia davvero la ricerca base (~1100 oro); senza questo flag e' un dry-run",
     )
     attack_scout.set_defaults(func=cmd_attack_scout)
+
+    attack_run = sub.add_parser(
+        "attack-run",
+        help="ciclo attacco completo: ricerca (e skip), deploy draghi+eroi, OCR esiti, home",
+    )
+    attack_run.add_argument("--config", default="config/config.example.yaml")
+    attack_run.add_argument(
+        "--allow-spend",
+        action="store_true",
+        help="esegue davvero il raid (~1100 oro per ricerca/Next); senza flag e' un dry-run",
+    )
+    attack_run.add_argument(
+        "--max-searches",
+        type=int,
+        default=2,
+        help="numero massimo di ricerche/skip (tetto di spesa ≈ max-searches*1100 oro)",
+    )
+    attack_run.add_argument("--dragons", type=int, default=13)
+    attack_run.add_argument("--no-heroes", action="store_true")
+    attack_run.set_defaults(func=cmd_attack_run)
 
     return parser
 

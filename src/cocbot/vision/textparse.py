@@ -16,6 +16,7 @@ _AMOUNT_SEPARATORS = re.compile(r"[\s\u00a0\u2009,.\-']+")
 _DURATION_TOKEN = re.compile(r"(\d+)\s*([dhms])")
 _LEVEL = re.compile(r"^\d{1,3}$")
 _NAME_WITH_COUNT = re.compile(r"^(?P<name>.+?)\s+x\s*(?P<count>\d{1,4})$", re.IGNORECASE)
+_PERCENT = re.compile(r"^(\d{1,3})%$")
 
 _UNIT_SECONDS = {"d": 86_400, "h": 3_600, "m": 60, "s": 1}
 
@@ -88,6 +89,20 @@ def parse_level(text: str) -> int | None:
     return value if 0 <= value <= 200 else None
 
 
+def parse_percent(text: str) -> int | None:
+    """Interpreta una percentuale di gioco (``"15%"`` -> ``15``).
+
+    Usata per il "Total damage" della schermata risultati; valori plausibili 0-100%.
+    """
+    if not text:
+        return None
+    match = _PERCENT.match(normalize(text).replace(" ", ""))
+    if match is None:
+        return None
+    value = int(match.group(1))
+    return value if 0 <= value <= 100 else None
+
+
 def split_name_count(text: str) -> tuple[str, int]:
     """Separa il nome dall'eventuale quantita' (``"Wall x 284"`` -> ``("wall", 284)``)."""
     normalized = normalize(text)
@@ -122,5 +137,6 @@ __all__ = [
     "parse_amount",
     "parse_duration",
     "parse_level",
+    "parse_percent",
     "split_name_count",
 ]

@@ -119,7 +119,19 @@ skip) devono essere esplicite e tracciate.
 
 ## Conseguenze
 
-Prossimi passi: catturare la fase di battaglia (senza deployare, poi con deploy controllato),
-implementare la sequenza di deploy Dragon Spam con early-exit, gestione esiti e ritorno in home;
-collegare `SkipSession` al loop "Next finche' base buona"; poi attacco live supervisionato con
-tetto di spesa per ricerca/skip.
+Prossimi passi: **skip reale** ("Next" + `SkipSession`, con tetto di spesa), **spell**, early-exit
+in battaglia, telemetria dei raid; poi attacco live supervisionato con tetto di spesa per ricerca/skip.
+
+### Aggiornamento 11:27 — `attack-run`: ciclo completo live + OCR esiti
+
+- **CLI `attack-run`** implementata: dry-run di default; con `--allow-spend --max-searches N`
+  esegue ricerca (ed eventuali "Next"), pan camera, deploy draghi+eroi, attesa esiti, OCR della
+  schermata risultati, ritorno in home; `--max-searches` è il tetto di spesa (≈1100 oro/ricerca).
+- **OCR esiti** implementato in `vision/battle_result.py` (`BattleResult`: esito Victory/Defeat,
+  % danno, bottino oro/elisir/dark, truppe spese) con parser puro + test su frame reali
+  (vittoria 15% → 59 023/53 271/1 296, defeat 14% → 112 000/58 510/154).
+- **Validazione live** (4 nov 11:27): una ricerca (1 100 oro) → base con loot buono (813 171 /
+  813 178 / 15 668) → pan → **13 draghi + AQ/GW** (35 tap, 13/13 rilevati) → esito **defeat 2%**
+  letto dall'OCR (bottino 26 675 oro / 14 941 elisir / 457 dark, truppe 13) → Return Home.
+  HUD: oro 9 261 405 → 9 702 871, elisir 9 199 187 → 9 447 077, dark 160 511 → 168 099
+  (include bottino raid e loot cart/collector), gemme 1 925 invariate.
