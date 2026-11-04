@@ -57,9 +57,9 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **Auto-reload disconnessione**: modal di rete → retry → attesa caricamento (splash→home) → ripristino finestra se minimizzata. **Esercitato su disconnessione reale il 4 nov** (variante "Connection lost": retry + reload eseguiti, nessuna spesa; ritorno in home bloccato dalla manutenzione server sopraggiunta, da riconfermare). Stato **`MAINTENANCE`** riconosciuto e gestito in pausa sicura (nessun input)
 - [x] **Esecuzione reale upgrade edificio/eroe** (riga → dialogo CONFIRM): **validata a runtime** (Air Bomb e Barbarian King, vedi sopra); il livello mostrato dal catalogo è quello di destinazione, non quello attuale
 - [x] **Opzioni eroi per auto-battaglia**: `attack.use_heroes` + `attack.heroes_require_ready` (config, pronte per il loop attacco)
-- [x] **Loop attacco v2 VALIDATO LIVE fino all'anteprima base**: `attack-scan` (menu Battle, 2 cicli live con hit area di chiusura), `ARMY_REVIEW` (pannello My Army, X + "Attack!"), `PREVIEW` (anteprima base con **OCR loot** 225 713/170 241/3 313 sul frame reale, "End Battle" e "Next", decisione con soglie/score, uscita senza deploy). Costo ricerca base misurato: −1 100 oro esatti. Deploy/battaglia non implementati
+- [x] **Loop attacco v3 VALIDATO LIVE fino alla battaglia**: `attack-scan` (menu Battle), `ARMY_REVIEW` (My Army), `PREVIEW` (OCR loot + End Battle/Next), `BATTLE` (timer, barra truppe) e `BATTLE_END` ("Return Home"). **Prima battaglia reale eseguita**: 4 draghi deployati su erba libera (contatore card x13→x9), 11% danno, Defeat, ritorno in home; 11 ricerche × 1 100 oro = 12 100 oro spesi, **gemme mai spese** (1 925). Deploy affidabile da completare
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
-- [ ] Loop attacco completo (skip reale + deploy dragon spam + esiti): anteprima base validata, battaglia da implementare
+- [ ] Loop attacco completo (skip reale + deploy dragon spam affidabile + esiti)
 - [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
 - [ ] GUI PySide6 completa
 

@@ -42,6 +42,8 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.PLACEMENT
     if ui.find_attack_button(image) is not None and ui.find_army_panel_close(image) is not None:
         return ScreenState.ARMY_REVIEW
+    if ui.find_return_home_button(image) is not None:
+        return ScreenState.BATTLE_END
     end_battle = ui.find_end_battle_button(image)
     if end_battle is not None:
         # anteprima base: c'e' anche "Next"; battaglia vera: "Next" non c'e' piu'
@@ -73,6 +75,7 @@ def describe(state: ScreenState) -> str:
         ScreenState.ARMY_REVIEW: "anteprima esercito pre-battaglia (My Army, pulsante Attack!)",
         ScreenState.PREVIEW: "anteprima base (loot + End Battle + Next)",
         ScreenState.BATTLE: "battaglia in corso (End Battle)",
+        ScreenState.BATTLE_END: "risultati battaglia (Return Home)",
         ScreenState.BUILD_MENU: "menu Build (Buildings & Heroes)",
         ScreenState.UPGRADE_CONFIRM: "dialogo conferma upgrade",
         ScreenState.PLACEMENT: "piazzamento nuovo edificio",

@@ -1,8 +1,9 @@
-# ADR-005 — Loop attacco: menu Battle, anteprima esercito e anteprima base (v2)
+# ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v3)
 
-**Data:** 2026-11-04 · **Stato:** implementata e **validata live fino all'anteprima base**
-(menu Battle, pannello My Army, anteprima base con OCR loot, decisione e uscita sicura).
-**Nessun deploy eseguito**: battaglia, skip reale e gestione esiti non sono implementati.
+**Data:** 2026-11-04 · **Stato:** implementata e validata live fino alla **battaglia reale**
+(menu Battle, My Army, anteprima base con OCR loot, stati `BATTLE`/`BATTLE_END`, uscita sicura).
+**Deploy sperimentale**: 4 draghi deployati su una battaglia reale (11% danno, Defeat); il deploy
+affidabile, lo skip reale e la gestione esiti non sono ancora completi.
 
 ## Contesto
 
@@ -58,16 +59,37 @@ skip) devono essere esplicite e tracciate.
 - **Test: suite 142 verdi** (18 dedicati al loop attacco con parse loot/decisioni/geometrie),
   ruff pulito.
 
+### Prime battaglie reali (4 nov, 10:20–10:45) — deploy parziale
+
+- **Flusso completo validato live**: `open_search` → anteprima → (non premendo End Battle) countdown
+  "Battle starts in" → **`BATTLE`** (timer "Battle ends in 3:00", barra truppe, End Battle) →
+  fine battaglia → **`BATTLE_END`** (banner Defeat/Victory, "Return Home") → home. `end_battle` e
+  `return_home` funzionano: uscita **immediata, senza conferma**, anche durante la battaglia.
+- **Deploy**: il tap sulla card **seleziona** la truppa (la card si ingrandisce; l'hover no). Il tap
+  sul campo deploya **solo su tessere di erba libera**: su edifici/muri il gioco apre l'ispezione
+  (tooltip) e non deploya. Con punti fissi sbagliati → 0 truppe (Defeat 0%). Con tessere di erba
+  libera (striscia in basso a destra) → **4 draghi deployati**, contatore card **x13→x9** verificato
+  sui frame, **11% di danno**, Defeat, Return Home OK.
+- **Limiti emersi**: il rilevamento dell'erba dipende da base/camera (in un tentativo solo 2 blob →
+  0 deploy); il contatore "xN" della card **non e' leggibile via OCR** (font stilizzato) e va
+  rilevato per differenza immagine. Prossimo passo: **sweep a griglia** di tap sul campo (i tap fuori
+  bersaglio ispezionano soltanto) con rilevamento del contatore per diff.
+- **Costi e sicurezza**: 11 ricerche base × 1 100 oro = **12 100 oro** (HUD 8 687 509 → 8 675 409);
+  **gemme sempre 1 925 (mai spese)**; nessuna chiusura del gioco durante le battaglie; bottino
+  dell'account invariato (raid con danno < 50% = sconfitta, 0 bottino).
+- **Nota HUD**: la lettura subito dopo "Return Home" puo' capitare su un frame di transizione e
+  dare valori sbagliati (visto una volta: riletta a schermo stabile → valori corretti).
+
 ## Limiti noti / da validare
 
-- **Deploy e battaglia reale** non implementati: mancano i frame della fase di battaglia (timer
-  "Battle starts in", barra truppe, deploy dragon spam) e la gestione esiti/trofei.
+- **Deploy**: funziona sulle tessere di erba libera (validato: 4 draghi, 11% danno) ma il
+  rilevamento delle tessere non e' ancora affidabile su tutte le basi → prossimo step sweep a
+  griglia + contatore per diff. Eroi/spell: tentati ma non ancora deployati con successo.
 - **"Next"** (skip reale) non e' stato premuto live: ogni skip costa ~1100 oro, da autorizzare
   nel piano di spesa del loop.
-- Timer di preparazione: osservato "Battle starts in: 26s"; la fase di battaglia vera non e' stata
-  catturata (uscita prima del countdown).
 - `SkipSession` e policy loot sono pronte ma non collegate a un loop skip+attack completo.
-- Nessun raid completato: nessun deploy, bottino/trofei dell'account invariati.
+- I raid eseguiti sono finiti in **Defeat** (nessuna stella): la strategia dragon spam va tarata
+  (punti di deploy piu' efficaci, uso eroi/spell, early-exit).
 
 ## Conseguenze
 

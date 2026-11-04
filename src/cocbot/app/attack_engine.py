@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
+import numpy as np
+
 from cocbot.app.upgrade_engine import UpgradeEngine, UpgradeEngineError
 from cocbot.core.types import Rect, ScreenState
 from cocbot.vision import ocr as ocr_module
@@ -323,6 +326,95 @@ class AttackEngine(UpgradeEngine):
         if self._wait_state(ScreenState.HOME, timeout_s=8.0) is not None:
             return True
         self.log("end_battle: home non raggiunta, uso recover_home")
+        return self.recover_home()
+
+    def wait_battle_start(self, *, timeout_s: float = 40.0) -> bool:
+        """Attende che il countdown 'Battle starts in' finisca (nessun input inviato)."""
+        if states.classify(self.grab()) is ScreenState.BATTLE:
+            return True
+        frame = self._wait_state(ScreenState.BATTLE, timeout_s=timeout_s)
+        if frame is None:
+            self.log("wait_battle_start: battaglia non iniziata entro il timeout")
+            return False
+        return True
+
+    @staticmethod
+    def _region_diff(first, second, region: Rect) -> float:
+        a = first[region.y : region.bottom, region.x : region.right]
+        b = second[region.y : region.bottom, region.x : region.right]
+        if a.shape != b.shape or a.size == 0:
+            return -1.0
+        return float(cv2.absdiff(a, b).mean())
+    def deploy_dragon_spam(
+        self,
+        image: np.ndarray,
+        *,
+        dragons: int = 13,
+        heroes: bool = True,
+    ) -> int:
+        """Deploya i draghi sulle tessere di erba libera, adattandosi alla selezione.
+
+        Misura live: tap sulla card = selezione (la card si ingrandisce); tap su erba libera =
+        una truppa deployata; tap su edifici/muri = ispezione (nessun deploy). Il contatore
+        della card ("xN") viene confrontato tra frame per capire se il deploy e' avvenuto;
+        se non cambia per 2 tentativi la card viene riselezionata. Ritorna i tap inviati.
+        """
+        h, w = image.shape[:2]
+        candidates = ui.find_deploy_candidates(image, limit=max(dragons + 2, 8))
+        if not candidates:
+            self.log("deploy: nessuna tessera di erba libera trovata")
+            return 0
+        count_region = Rect(int(w * 0.168), int(h * 0.848), int(w * 0.042), int(h * 0.034))
+        card = ui.battle_card_point(image, ui.BATTLE_DRAGON_CARD)
+        self.log(f"deploy: seleziono i draghi @ {card} ({len(candidates)} tessere candidate)")
+        self._tap(card, wait_s=0.5)
+        previous = self.grab()
+        deployed = 0
+        misses = 0
+        attempts = 0
+        while deployed < dragons and attempts < dragons * 3:
+            point = candidates[attempts % len(candidates)]
+            self._tap(point, wait_s=0.35)
+            attempts += 1
+            current = self.grab()
+            changed = self._region_diff(previous, current, count_region) > 6.0
+            previous = current
+            if changed:
+                deployed += 1
+                misses = 0
+            else:
+                misses += 1
+                if misses >= 2:
+                    self.log("deploy: contatore invariato, riseleziono la card")
+                    self._tap(card, wait_s=0.3)
+                    misses = 0
+        if heroes:
+            for label, fraction in (
+                ("arciere", ui.BATTLE_QUEEN_CARD),
+                ("grand warden", ui.BATTLE_WARDEN_CARD),
+            ):
+                hero_card = ui.battle_card_point(image, fraction)
+                self.log(f"deploy: provo l'eroe {label} @ {hero_card}")
+                self._tap(hero_card, wait_s=0.4)
+                self._tap(candidates[attempts % len(candidates)], wait_s=0.3)
+                attempts += 1
+        self.log(f"deploy: truppe deployate rilevate={deployed}, tap={attempts}")
+        return attempts
+
+    def return_home(self) -> bool:
+        """Dalla schermata risultati battaglia: preme "Return Home" e attende la home."""
+        image = self.grab()
+        state = states.classify(image)
+        if state is ScreenState.HOME:
+            return True
+        button = ui.find_return_home_button(image)
+        if button is None:
+            self.log(f"return_home: pulsante Return Home non trovato (stato {state.value})")
+            return self.recover_home()
+        self.log("return_home: premo 'Return Home' (fine battaglia)")
+        self._tap(ui.center(button), wait_s=1.5)
+        if self._wait_state(ScreenState.HOME, timeout_s=8.0) is not None:
+            return True
         return self.recover_home()
 
     def scan_battle_menu(self) -> BattleMenuRead:

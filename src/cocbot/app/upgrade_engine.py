@@ -840,6 +840,9 @@ class UpgradeEngine:
             elif state is ScreenState.PREVIEW:
                 end_battle = ui.find_end_battle_button(image)
                 point = ui.center(end_battle) if end_battle is not None else None
+            elif state is ScreenState.BATTLE_END:
+                return_home = ui.find_return_home_button(image)
+                point = ui.center(return_home) if return_home is not None else None
             elif state is ScreenState.BATTLE:
                 self.log("recover: battaglia in corso, nessuna azione automatica")
                 return False

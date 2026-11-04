@@ -204,9 +204,108 @@ def find_attack_button(image: np.ndarray) -> Rect | None:
 # End Battle centro (0,059 W, 0,790 H) 165x51 px; Next centro ~(0,93 W, 0,73 H); loot
 # (oro/elisir/dark) nella regione in alto a sinistra.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Battaglia: barra truppe in basso ed esempi di punti di deploy sulla fascia esterna.
+# Misure live 4 nov (1733x975): card draghi (0,164 W, 0,911 H), AQ (0,237, 0,911),
+# Grand Warden (0,310, 0,911), spell (0,383, 0,911). I punti di deploy sono su erba esterna
+# (lontani da HUD, pulsanti e zona "Battle ends in").
+# ---------------------------------------------------------------------------
+BATTLE_DRAGON_CARD = (0.164, 0.911)
+BATTLE_QUEEN_CARD = (0.237, 0.911)
+BATTLE_WARDEN_CARD = (0.310, 0.911)
+BATTLE_SPELL_CARD = (0.383, 0.911)
 BATTLE_END_BATTLE_REGION = (0.0, 0.68, 0.35, 0.20)  # (x, y, w, h) frazioni
 BATTLE_NEXT_REGION = (0.80, 0.66, 0.20, 0.16)
 LOOT_REGION = (0.00, 0.10, 0.18, 0.14)  # "Available Loot": 3 importi (oro, elisir, dark)
+DEPLOY_POINTS: tuple[tuple[float, float], ...] = (
+    (0.16, 0.72),
+    (0.30, 0.80),
+    (0.50, 0.80),
+    (0.70, 0.78),
+    (0.85, 0.68),
+    (0.88, 0.45),
+    (0.12, 0.45),
+    (0.30, 0.20),
+    (0.62, 0.20),
+    (0.50, 0.32),
+)
+
+
+def battle_card_point(image: np.ndarray, fraction: tuple[float, float]) -> tuple[int, int]:
+    """Pixel client del centro di una card della barra truppe (frazioni del frame)."""
+    h, w = image.shape[:2]
+    return int(round(fraction[0] * w)), int(round(fraction[1] * h))
+
+
+def deploy_point(image: np.ndarray, fraction: tuple[float, float]) -> tuple[int, int]:
+    """Pixel client di un punto di deploy (frazioni del frame)."""
+    h, w = image.shape[:2]
+    return int(round(fraction[0] * w)), int(round(fraction[1] * h))
+
+
+# erba libera (tessere deployabili): misurata sui frame reali di battaglia
+GRASS_LOW = (30, 60, 110)
+GRASS_HIGH = (55, 200, 230)
+
+
+def find_deploy_candidates(image: np.ndarray, *, limit: int = 14) -> list[tuple[int, int]]:
+    """Centroidi dei piu' grandi blob di **erba libera** nel campo di battaglia.
+
+    Misura live 4 nov: i tap sulle tessere di erba libera deployano le truppe; i tap su
+    edifici/muri no. La maschera esclude la barra truppe (basso) e l'HUD alto; i candidati
+    sono ordinati dal piu' vicino al centro mappa (deploy piu' efficace).
+    """
+    if not _valid(image):
+        return []
+    h, w = image.shape[:2]
+    hsv = _hsv(image)
+    mask = cv2.inRange(hsv, GRASS_LOW, GRASS_HIGH)
+    mask[: int(h * 0.06), :] = 0
+    mask[int(h * 0.86) :, :] = 0
+    count, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    min_area = int(0.003 * w * h)
+    center = (w * 0.50, h * 0.45)
+    candidates: list[tuple[float, int, int]] = []
+    for index in range(1, count):
+        area = int(stats[index, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        cx, cy = int(centroids[index][0]), int(centroids[index][1])
+        distance = ((cx - center[0]) ** 2 + (cy - center[1]) ** 2) ** 0.5
+        candidates.append((distance, cx, cy))
+    candidates.sort()
+    return [(cx, cy) for _distance, cx, cy in candidates[:limit]]
+
+
+# risultati battaglia: pulsante verde "Return Home" in basso al centro (misura live
+# 4 nov 1733x975: rect (756,795,224,56) -> centro (0,501 W, 0,844 H), aspetto 4,0)
+BATTLE_END_RETURN_REGION = (0.36, 0.79, 0.28, 0.12)
+
+
+def find_return_home_button(image: np.ndarray) -> Rect | None:
+    """Riquadro del pulsante verde "Return Home" (risultati battaglia), o ``None``."""
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0 = int(w * BATTLE_END_RETURN_REGION[0])
+    y0 = int(h * BATTLE_END_RETURN_REGION[1])
+    x1 = int(w * (BATTLE_END_RETURN_REGION[0] + BATTLE_END_RETURN_REGION[2]))
+    y1 = int(h * (BATTLE_END_RETURN_REGION[1] + BATTLE_END_RETURN_REGION[3]))
+    hsv = _hsv(image)
+    mask = cv2.inRange(hsv, GREEN_BUTTON_LOW, GREEN_BUTTON_HIGH)
+    mask[:y0, :] = 0
+    mask[y1:, :] = 0
+    mask[:, :x0] = 0
+    mask[:, x1:] = 0
+    components = _components(mask, min_area=int(_BUTTON_MIN_AREA * w * h))
+    for component in components:
+        _area, _cx, _cy, _x, _y, cw, ch = component
+        if cw < 0.10 * w or not (0.04 * h <= ch <= 0.08 * h):
+            continue
+        if not (2.8 <= cw / max(1, ch) <= 5.5):  # pulsante orizzontale "Return Home"
+            continue
+        return _rect_from_component(component)
+    return None
 
 
 def find_end_battle_button(image: np.ndarray) -> Rect | None:
