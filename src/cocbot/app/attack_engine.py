@@ -535,6 +535,9 @@ class AttackEngine(UpgradeEngine):
         respect_storage_caps: bool = True,
         early_exit_damage: int = 0,
         battle_end_timeout_s: float = 240.0,
+        strategy: str | None = None,
+        clones: int | None = None,
+        clone_card_slot: int | None = None,
     ) -> dict:
         """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
 
@@ -684,13 +687,33 @@ class AttackEngine(UpgradeEngine):
                 report["action"] = "battle_not_started"
                 self.end_battle()
                 return self._finish_report(report)
-            time.sleep(3.0)
-            battle = self.grab()
-            self.pan_camera(0.28, image=battle)
-            time.sleep(0.8)
-            report["deploy_taps"] = self.deploy_dragon_spam(
-                self.grab(), dragons=dragons, heroes=heroes
-            )
+            chosen_strategy = strategy or self.config.attack.strategy
+            chosen_clones = int(self.config.attack.clone_spells if clones is None else clones)
+            report["strategy"] = chosen_strategy
+            report["clones"] = chosen_clones
+            if chosen_strategy == "dragon_clone":
+                # deploy veloce: niente attesa lunga; pan solo se non c'e' erba visibile
+                battle = self.grab()
+                if not ui.find_deploy_candidates(battle, limit=1):
+                    self.pan_camera(0.22, image=battle)
+                    time.sleep(0.3)
+                    battle = self.grab()
+                time.sleep(0.5)
+                report["deploy_taps"] = self.deploy_dragon_clone(
+                    battle,
+                    dragons=dragons,
+                    heroes=heroes,
+                    clones=chosen_clones,
+                    clone_card_slot=clone_card_slot,
+                )
+            else:
+                time.sleep(3.0)
+                battle = self.grab()
+                self.pan_camera(0.28, image=battle)
+                time.sleep(0.8)
+                report["deploy_taps"] = self.deploy_dragon_spam(
+                    self.grab(), dragons=dragons, heroes=heroes
+                )
             if spells > 0:
                 report["spell_taps"] = self.deploy_spells(self.grab(), count=spells)
             end_frame = None
@@ -762,6 +785,9 @@ class AttackEngine(UpgradeEngine):
         early_exit_damage: int = 40,
         max_gold_spend: int = 2_200,
         sleep_between_s: float = 8.0,
+        strategy: str | None = None,
+        clones: int | None = None,
+        clone_card_slot: int | None = None,
     ) -> dict:
         """Ripete il ciclo attacco con **tetto di spesa** e si ferma se un ciclo non attacca.
 
@@ -787,6 +813,9 @@ class AttackEngine(UpgradeEngine):
                 heroes=heroes,
                 spells=0,
                 early_exit_damage=0,
+                strategy=strategy,
+                clones=clones,
+                clone_card_slot=clone_card_slot,
             )
             report["reports"].append(cycle_report)
             report["stopped"] = "dry_run"
@@ -811,6 +840,9 @@ class AttackEngine(UpgradeEngine):
                 heroes=heroes,
                 spells=spells,
                 early_exit_damage=early_exit_damage,
+                strategy=strategy,
+                clones=clones,
+                clone_card_slot=clone_card_slot,
             )
             report["reports"].append(cycle_report)
             report["cycles_done"] += 1
@@ -852,6 +884,74 @@ class AttackEngine(UpgradeEngine):
         win32.post_mouse_drag(self.window.hwnd, x0, y0, x1, y1, steps=12, hold_ms=60)
         time.sleep(0.6)
         self.log(f"pan_camera: drag ({x0},{y0})->({x1},{y1})")
+
+    def _single_deploy_point(self, image: np.ndarray) -> tuple[int, int] | None:
+        """Un solo punto deployabile (erba libera) per la strategia dragon clone."""
+        candidates = ui.find_deploy_candidates(image, limit=1)
+        if candidates:
+            return candidates[0]
+        grid = ui.battle_field_grid(image)
+        if grid:
+            self.log("deploy_clone: nessuna erba rilevata, uso un punto della griglia (rischio ispezione)")
+            return grid[0]
+        return None
+
+    def deploy_dragon_clone(
+        self,
+        image: np.ndarray,
+        *,
+        dragons: int = 13,
+        heroes: bool = True,
+        clones: int = 0,
+        clone_card_slot: int | None = None,
+    ) -> int:
+        """Strategia veloce "dragon clone".
+
+        Meccanica: si seleziona la card draghi **una sola volta** (resta selezionata) e si
+        tappano ripetutamente le **stesse coordinate** (ogni tap schiera una truppa), con un
+        intervallo breve (``attack.deploy_interval_s``). Poi si seleziona la card Clone Spell
+        (``attack.clone_card_slot``: 0 = primo slot) e si lanciano i cloni sui draghi, infine
+        gli eroi subito dietro. Ritorna il numero di tap inviati.
+        """
+        height = image.shape[0]
+        point = self._single_deploy_point(image)
+        if point is None:
+            self.log("deploy_clone: nessun punto di deploy trovato")
+            return 0
+        interval = float(self.config.attack.deploy_interval_s)
+        slot = int(self.config.attack.clone_card_slot if clone_card_slot is None else clone_card_slot)
+        card = ui.battle_card_point(image, ui.BATTLE_DRAGON_CARD)
+        self.log(
+            f"deploy_clone: {dragons} draghi @ {card} tutti su {point}"
+            f" (intervallo {interval:.2f}s)"
+        )
+        self._tap(card, wait_s=0.25)
+        taps = 1
+        for _ in range(max(0, dragons)):
+            self._tap(point, wait_s=interval)
+            taps += 1
+        clone_count = max(0, clones)
+        if clone_count:
+            clone_card = ui.battle_card_point(image, ui.battle_spell_card(slot))
+            self.log(f"deploy_clone: {clone_count} cloni @ {clone_card} sui draghi in {point}")
+            self._tap(clone_card, wait_s=0.25)
+            taps += 1
+            for _ in range(clone_count):
+                self._tap(point, wait_s=max(0.08, interval))
+                taps += 1
+        if heroes:
+            behind = (point[0], min(height - 1, point[1] + int(height * 0.03)))
+            for label, fraction in (
+                ("arciere", ui.BATTLE_QUEEN_CARD),
+                ("grand warden", ui.BATTLE_WARDEN_CARD),
+            ):
+                hero_card = ui.battle_card_point(image, fraction)
+                self.log(f"deploy_clone: eroe {label} @ {hero_card} -> {behind}")
+                self._tap(hero_card, wait_s=0.2)
+                self._tap(behind, wait_s=0.2)
+                taps += 2
+        self.log(f"deploy_clone: completato, tap={taps}")
+        return taps
 
     def deploy_spells(self, image: np.ndarray, *, count: int = 5) -> int:
         """Seleziona la card spell e lancia le spell sulle tessere di erba/centro villaggio.

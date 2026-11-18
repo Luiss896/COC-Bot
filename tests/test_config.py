@@ -51,7 +51,7 @@ def test_example_config_is_valid() -> None:
     config = load_config(EXAMPLE)
     assert config.safety.never_spend_gems is True
     assert config.device.backend in {"window", "adb"}
-    assert config.attack.strategy == "dragon_spam"
+    assert config.attack.strategy == "dragon_clone"
     assert config.capture.backend == "wgc"
     assert config.input.backend == "winmsg"
     assert config.safety.max_session_hours is None  # illimitato di default

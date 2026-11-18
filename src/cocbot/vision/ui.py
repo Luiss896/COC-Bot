@@ -214,6 +214,14 @@ BATTLE_DRAGON_CARD = (0.164, 0.911)
 BATTLE_QUEEN_CARD = (0.237, 0.911)
 BATTLE_WARDEN_CARD = (0.310, 0.911)
 BATTLE_SPELL_CARD = (0.383, 0.911)
+# le card della barra sono equidistanti (verificato sulle card note: 0.073 di passo)
+BATTLE_CARD_STEP = 0.073
+
+
+def battle_spell_card(index: int = 0) -> tuple[float, float]:
+    """Frazione del centro della card spell numero ``index`` (0 = primo slot)."""
+    base_x, base_y = BATTLE_SPELL_CARD
+    return (round(base_x + BATTLE_CARD_STEP * max(0, index), 3), base_y)
 BATTLE_END_BATTLE_REGION = (0.0, 0.68, 0.35, 0.20)  # (x, y, w, h) frazioni
 BATTLE_NEXT_REGION = (0.80, 0.66, 0.20, 0.16)
 LOOT_REGION = (0.00, 0.10, 0.18, 0.14)  # "Available Loot": 3 importi (oro, elisir, dark)

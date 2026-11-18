@@ -134,7 +134,15 @@ class EarlyExitConfig(BaseModel):
 
 
 class AttackConfig(BaseModel):
-    strategy: str = "dragon_spam"
+    # strategia di deploy: "dragon_clone" = tutti i draghi nello stesso punto, cloni
+    # sui draghi e eroi subito dopo (veloce); "dragon_spam" = vecchia a due passate.
+    strategy: str = "dragon_clone"
+    # numero di Clone Spell da lanciare sui draghi (configurabile anche dalla GUI)
+    clone_spells: int = Field(default=2, ge=0, le=8)
+    # posizione della card Clone Spell nella barra spell (0 = primo slot)
+    clone_card_slot: int = Field(default=0, ge=0, le=8)
+    # intervallo tra i tap di deploy (secondi): piu' basso = deploy piu' veloce
+    deploy_interval_s: float = Field(default=0.15, ge=0.02, le=1.0)
     # strategia esercito: gli eroi vanno schierati? Se un eroe e' in upgrade non e'
     # schierabile, quindi la strategia deve poterli escludere o attendere.
     use_heroes: bool = True

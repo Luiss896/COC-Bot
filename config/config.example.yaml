@@ -75,7 +75,12 @@ army:
   min_reserve_for_army: { gold: 200000, elixir: 300000, dark: 5000 }
 
 attack:
-  strategy: "dragon_spam"
+  # dragon_clone = tutti i draghi nello stesso punto, cloni sui draghi, eroi subito
+  # dopo (piu' veloce); dragon_spam = vecchia strategia a due passate.
+  strategy: "dragon_clone"
+  clone_spells: 2                  # Clone Spell da lanciare sui draghi (GUI: campo "Cloni")
+  clone_card_slot: 0               # posizione della card Clone Spell (0 = primo slot)
+  deploy_interval_s: 0.15          # intervallo tra i tap di deploy (secondi)
   # strategia esercito: usare gli eroi in battaglia? Se un eroe e' in upgrade non e'
   # schierabile: con heroes_require_ready=true la battaglia evita/spetta gli eroi non pronti.
   use_heroes: true

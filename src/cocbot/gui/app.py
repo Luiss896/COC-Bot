@@ -635,7 +635,10 @@ class CocbotApp:
         for index, (title, text) in enumerate(
             (
                 ("1 · Ricerca", "Cerca una base (~1.100 oro) e salta quelle con poco bottino."),
-                ("2 · Deploy", "Schiera draghi + eroi (+ spell) con camera pan, senza rubare il focus."),
+                (
+                    "2 · Deploy",
+                    "Dragon Clone: tutti i draghi nello stesso punto, cloni sui draghi, eroi subito dopo.",
+                ),
                 ("3 · Esito", "Legge Victory/Defeat e il bottino, poi torna in home."),
             )
         ):
@@ -654,32 +657,55 @@ class CocbotApp:
         )
         grid = tk.Frame(options.body, bg=palette.card)
         grid.pack(fill="x")
-        for column in range(5):
+        for column in range(4):
             grid.columnconfigure(column, weight=1)
         self.attack_vars = {
             "searches": tk.StringVar(value="2"),
             "spells": tk.StringVar(value="0"),
             "dragons": tk.StringVar(value="13"),
+            "clones": tk.StringVar(value=str(self.config.attack.clone_spells)),
             "early": tk.StringVar(value="0"),
             "cycles": tk.StringVar(value="2"),
+            "strategy": tk.StringVar(value=self.config.attack.strategy),
             "heroes": tk.StringVar(value="1"),
             "caps": tk.StringVar(value="1"),
         }
         fields = (
             ("searches", "Ricerche max", 1, 20, "Tetto di spesa: ~1.100 oro per ricerca."),
             ("spells", "Spell", 0, 8, "Spell già in esercito da lanciare dopo il deploy."),
-            ("dragons", "Draghi", 1, 20, "Numero di draghi da schierare."),
+            ("dragons", "Draghi", 1, 20, "Numero di draghi da schierare (tutti nello stesso punto)."),
+            ("clones", "Cloni", 0, 8, "Clone Spell da lanciare subito sui draghi."),
             ("early", "Early-exit danno %", 0, 100, "0 = disattivato; esce al raggiungimento della soglia."),
             ("cycles", "Cicli farm", 1, 5, "Solo per il farm: quanti raid ripetere."),
         )
-        for column, (key, label, low, high, tooltip) in enumerate(fields):
-            ttk.Label(grid, text=label, style="Field.TLabel").grid(row=0, column=column, sticky="w", padx=(0, 8))
+        for index, (key, label, low, high, tooltip) in enumerate(fields):
+            row = (index // 4) * 2
+            column = index % 4
+            ttk.Label(grid, text=label, style="Field.TLabel").grid(
+                row=row, column=column, sticky="w", padx=(0, 8), pady=(4, 0)
+            )
             spin = ttk.Spinbox(
                 grid, from_=low, to=high, increment=1, textvariable=self.attack_vars[key], width=7
             )
-            spin.grid(row=1, column=column, sticky="w", padx=(0, 8), pady=(2, 0))
+            spin.grid(row=row + 1, column=column, sticky="w", padx=(0, 8), pady=(2, 0))
             self._tip(spin, tooltip)
             self.attack_vars[key].trace_add("write", lambda *_args: self._update_attack_costs())
+        ttk.Label(grid, text="Strategia", style="Field.TLabel").grid(
+            row=2, column=2, sticky="w", padx=(0, 8), pady=(4, 0)
+        )
+        strategy = ttk.Combobox(
+            grid,
+            textvariable=self.attack_vars["strategy"],
+            values=("dragon_clone", "dragon_spam"),
+            state="readonly",
+            width=14,
+        )
+        strategy.grid(row=3, column=2, sticky="w", padx=(0, 8), pady=(2, 0))
+        self._tip(
+            strategy,
+            "dragon_clone: tutti i draghi nello stesso punto, poi cloni, poi eroi (più veloce). "
+            "dragon_spam: vecchia strategia a due passate.",
+        )
         checks = tk.Frame(options.body, bg=palette.card)
         checks.pack(fill="x", pady=(10, 0))
         heroes = ttk.Checkbutton(
@@ -730,6 +756,7 @@ class CocbotApp:
             notes.body,
             (
                 "Ogni ricerca/Next costa ~1.100 oro: «Ricerche max» è il tetto di spesa.",
+                "Dragon Clone: draghi tutti nello stesso punto, poi cloni, poi eroi (deploy veloce).",
                 "Con storage piene il bot evita raid inutili (o attacca solo per il dark, se configurato).",
                 "Non chiudere il gioco durante una battaglia: usa «Annulla attività» o il kill switch.",
                 "Esiti e bottino finiscono nel Registro e nei report in out/attack/.",
@@ -1587,16 +1614,26 @@ class CocbotApp:
         return result
 
     # ================================================================== azioni: battaglia
-    def _attack_options(self) -> dict[str, int | bool]:
+    def _attack_options(self) -> dict[str, int | bool | str]:
         clamp = formatting.clamp_int
+        strategy = self.attack_vars["strategy"].get() or "dragon_clone"
+        if strategy not in ("dragon_clone", "dragon_spam"):
+            strategy = "dragon_clone"
         return {
             "searches": clamp(self.attack_vars["searches"].get(), default=2, minimum=1, maximum=20),
             "spells": clamp(self.attack_vars["spells"].get(), default=0, minimum=0, maximum=8),
             "dragons": clamp(self.attack_vars["dragons"].get(), default=13, minimum=1, maximum=20),
+            "clones": clamp(
+                self.attack_vars["clones"].get(),
+                default=int(self.config.attack.clone_spells),
+                minimum=0,
+                maximum=8,
+            ),
             "early": clamp(self.attack_vars["early"].get(), default=0, minimum=0, maximum=100),
             "cycles": clamp(self.attack_vars["cycles"].get(), default=2, minimum=1, maximum=5),
             "heroes": self.attack_vars["heroes"].get() == "1",
             "caps": self.attack_vars["caps"].get() == "1",
+            "strategy": strategy,
         }
 
     def _update_attack_costs(self) -> None:
@@ -1632,6 +1669,10 @@ class CocbotApp:
             str(options["dragons"]),
             "--spells",
             str(options["spells"]),
+            "--clones",
+            str(options["clones"]),
+            "--strategy",
+            str(options["strategy"]),
             "--early-exit-damage",
             str(options["early"]),
         ]
@@ -1655,6 +1696,10 @@ class CocbotApp:
             str(options["dragons"]),
             "--spells",
             str(options["spells"]),
+            "--clones",
+            str(options["clones"]),
+            "--strategy",
+            str(options["strategy"]),
             "--early-exit-damage",
             str(options["early"]),
             "--max-gold-spend",
@@ -1693,8 +1738,11 @@ class CocbotApp:
         searches = int(options["searches"])
         deploy = f"{options['dragons']} draghi"
         deploy += " + eroi" if options["heroes"] else ""
+        if int(options["clones"]):
+            deploy += f" + {options['clones']} cloni"
         if int(options["spells"]):
             deploy += f" + {options['spells']} spell"
+        deploy += f" (strategia {options['strategy']})"
         early = int(options["early"])
         extra = f"Early-exit al {early}% di danno.\n" if early else ""
         if not self._confirm_spend(
@@ -1716,6 +1764,9 @@ class CocbotApp:
             "Farm automatico",
             "Questa azione spende risorse reali.\n\n"
             f"Cicli: {cycles} · ricerche per ciclo: {searches}.\n"
+            f"Deploy: {options['dragons']} draghi + {options['clones']} cloni"
+            + (" + eroi" if options["heroes"] else "")
+            + f" (strategia {options['strategy']}).\n"
             f"Tetto di spesa: {total} ({cycles} × {searches} × ~1.100 oro).\n\n"
             "Il farm si ferma da solo se un ciclo non porta a un attacco (es. storage piene).\n\n"
             "Continuare?",

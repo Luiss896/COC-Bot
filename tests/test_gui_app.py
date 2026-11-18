@@ -238,6 +238,8 @@ def test_raid_requires_confirmation_and_uses_teto(gui: GuiHarness) -> None:
     assert arguments[:2] == ["attack-run", "--allow-spend"]
     assert arguments[2:4] == ["--max-searches", "2"]
     assert "--dragons" in arguments and "--spells" in arguments
+    assert arguments[arguments.index("--clones") + 1] == "2"
+    assert arguments[arguments.index("--strategy") + 1] == "dragon_clone"
     assert arguments[-2:] == CONFIG_ARG
     assert gui.confirm.calls[-1][0] == "Raid reale"
 
@@ -257,6 +259,22 @@ def test_scout_and_farm_require_confirmation(gui: GuiHarness) -> None:
     assert "--max-gold-spend" in arguments
     index = arguments.index("--max-gold-spend")
     assert arguments[index + 1] == "4400"
+
+
+def test_gui_clones_and_strategy_reach_cli(gui: GuiHarness) -> None:
+    gui.app.attack_vars["clones"].set("4")
+    gui.app.attack_vars["strategy"].set("dragon_spam")
+    gui.confirm.answer = True
+    gui.app.buttons["attack_raid"].invoke()
+    arguments, _label = gui.runner.starts[0]
+    assert arguments[arguments.index("--clones") + 1] == "4"
+    assert arguments[arguments.index("--strategy") + 1] == "dragon_spam"
+    assert "--strategy" in arguments
+
+
+def test_gui_clones_default_from_config(gui: GuiHarness) -> None:
+    assert gui.app.attack_vars["clones"].get() == "2"
+    assert gui.app.attack_vars["strategy"].get() == "dragon_clone"
 
 
 def test_upgrade_target_execution_and_budgets(gui: GuiHarness) -> None:

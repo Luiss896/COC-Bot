@@ -285,7 +285,11 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         f"  walls: mode={config.walls.mode.value}  reserve_builder={config.walls.reserve_builder_for_walls}  "
         f"switch_all_when_walls_max={config.walls.switch_to_all_builders_when_walls_max}"
     )
-    print(f"  attack: strategy={config.attack.strategy}  preset={config.upgrade.preset}")
+    print(
+        f"  attack: strategy={config.attack.strategy}  clones={config.attack.clone_spells}  "
+        f"clone_card_slot={config.attack.clone_card_slot}  deploy_interval_s={config.attack.deploy_interval_s}  "
+        f"preset={config.upgrade.preset}"
+    )
     print(
         f"  upgrade: enabled={config.upgrade.enabled}  dry_run={config.upgrade.dry_run}  "
         f"priority={config.upgrade.priority}  max/cycle={config.upgrade.max_upgrades_per_cycle}  "
@@ -579,6 +583,9 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             spells=max(0, args.spells),
             respect_storage_caps=not args.ignore_caps,
             early_exit_damage=max(0, args.early_exit_damage),
+            strategy=args.strategy,
+            clones=args.clones,
+            clone_card_slot=args.clone_card_slot,
         )
         print("\n== ATTACK RUN ==")
         print(f"  dry_run={report['dry_run']} azione={report['action']}")
@@ -655,6 +662,9 @@ def cmd_attack_farm(args: argparse.Namespace) -> int:
             spells=max(0, args.spells),
             early_exit_damage=max(0, args.early_exit_damage),
             max_gold_spend=max(0, args.max_gold_spend),
+            strategy=args.strategy,
+            clones=args.clones,
+            clone_card_slot=args.clone_card_slot,
         )
         print("\n== ATTACK FARM ==")
         print(
@@ -892,6 +902,24 @@ def build_parser() -> argparse.ArgumentParser:
     attack_run.add_argument("--no-heroes", action="store_true")
     attack_run.add_argument("--spells", type=int, default=0, help="spell da lanciare dopo il deploy")
     attack_run.add_argument(
+        "--strategy",
+        choices=["dragon_clone", "dragon_spam"],
+        default=None,
+        help="strategia di deploy (default: attack.strategy in config)",
+    )
+    attack_run.add_argument(
+        "--clones",
+        type=int,
+        default=None,
+        help="Clone Spell da lanciare sui draghi (default: attack.clone_spells)",
+    )
+    attack_run.add_argument(
+        "--clone-card-slot",
+        type=int,
+        default=None,
+        help="posizione della card Clone Spell (0 = primo slot, default config)",
+    )
+    attack_run.add_argument(
         "--ignore-caps",
         action="store_true",
         help="ignora il cap delle storage (default: salta il raid se oro+elisir sono pieni)",
@@ -919,6 +947,14 @@ def build_parser() -> argparse.ArgumentParser:
     attack_farm.add_argument("--dragons", type=int, default=13)
     attack_farm.add_argument("--no-heroes", action="store_true")
     attack_farm.add_argument("--spells", type=int, default=5)
+    attack_farm.add_argument(
+        "--strategy",
+        choices=["dragon_clone", "dragon_spam"],
+        default=None,
+        help="strategia di deploy (default: attack.strategy in config)",
+    )
+    attack_farm.add_argument("--clones", type=int, default=None, help="Clone Spell sui draghi (default config)")
+    attack_farm.add_argument("--clone-card-slot", type=int, default=None, help="posizione card Clone Spell")
     attack_farm.add_argument(
         "--early-exit-damage",
         type=int,
