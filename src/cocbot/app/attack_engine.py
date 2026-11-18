@@ -227,7 +227,14 @@ def dark_fallback_decision(
     gold_min = int(thresholds.get("gold_min", 0))
     elixir_min = int(thresholds.get("elixir_min", 0))
     dark_min = int(thresholds.get("dark_min", 0))
-    # si applica solo se oro/elisir sono stati limitati dalla capacita'
+    # si applica solo se la capacita' residua limita davvero oro/elisir: se e' la base
+    # ad avere poco bottino la policy normale decide (niente raid inutili a ~1100 oro).
+    limited_by_capacity = (
+        (usable_gold is not None and loot.gold is not None and usable_gold < loot.gold)
+        or (usable_elixir is not None and loot.elixir is not None and usable_elixir < loot.elixir)
+    )
+    if not limited_by_capacity:
+        return None
     if effective.gold >= gold_min and effective.elixir >= elixir_min:
         return None
     dark = loot.dark
@@ -488,7 +495,14 @@ class AttackEngine(UpgradeEngine):
             state = states.classify(frame)
             if state in (ScreenState.BATTLE_END, ScreenState.HOME):
                 return True
-            confirm = ui.find_confirm_button(frame)
+            # il bottone CONFIRM va cercato SOLO su un dialogo di conferma: in BATTLE
+            # la barra truppe ha elementi verdi che producevano falsi positivi (tap sul
+            # campo al posto della conferma).
+            confirm = (
+                ui.find_confirm_button(frame)
+                if state is ScreenState.UPGRADE_CONFIRM
+                else None
+            )
             if confirm is not None:
                 self.log("end_battle_early: confermo la fine battaglia")
                 self._tap(ui.center(confirm), wait_s=1.2)
@@ -498,7 +512,7 @@ class AttackEngine(UpgradeEngine):
     def _hud_text(self) -> str | None:
         try:
             return str(self.read_hud(self.grab()))
-        except AttackEngineError:
+        except (UpgradeEngineError, ocr_module.OcrUnavailable):
             return None
 
     def _finish_report(self, report: dict) -> dict:
@@ -685,7 +699,7 @@ class AttackEngine(UpgradeEngine):
             while time.monotonic() - started < battle_end_timeout_s:
                 try:
                     image = self.grab()
-                except AttackEngineError as exc:
+                except UpgradeEngineError as exc:
                     self.log(f"battaglia: grab fallito: {exc}")
                     time.sleep(1.0)
                     continue
@@ -726,7 +740,11 @@ class AttackEngine(UpgradeEngine):
             self.return_home()
             return self._finish_report(report)
         finally:
-            state = states.classify(self.grab())
+            try:
+                state = states.classify(self.grab())
+            except (UpgradeEngineError, ocr_module.OcrUnavailable) as exc:
+                self.log(f"cleanup: grab fallito: {exc}")
+                state = None
             if state is ScreenState.PREVIEW:
                 self.end_battle()
             elif state is ScreenState.BATTLE_END:
@@ -774,18 +792,21 @@ class AttackEngine(UpgradeEngine):
             report["stopped"] = "dry_run"
             return report
         for index in range(report["cycles_requested"]):
-            if report["spent_gold"] + SEARCH_COST_GOLD > max_gold_spend:
+            # quanti "slot" di ricerca restano entro il tetto di spesa
+            allowed_searches = (max_gold_spend - report["spent_gold"]) // SEARCH_COST_GOLD
+            if allowed_searches < 1:
                 report["stopped"] = (
                     f"tetto spesa oro ({report['spent_gold']} + {SEARCH_COST_GOLD} > {max_gold_spend})"
                 )
                 break
+            cycle_searches = max(1, min(max_searches, allowed_searches))
             self.log(
                 f"farm: ciclo {index + 1}/{report['cycles_requested']} "
-                f"(speso finora {report['spent_gold']} oro)"
+                f"(speso finora {report['spent_gold']} oro, ricerche max {cycle_searches})"
             )
             cycle_report = self.run_attack(
                 allow_spend=True,
-                max_searches=max_searches,
+                max_searches=cycle_searches,
                 dragons=dragons,
                 heroes=heroes,
                 spells=spells,

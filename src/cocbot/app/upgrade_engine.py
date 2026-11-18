@@ -896,7 +896,12 @@ class UpgradeEngine:
                 self.log(f"recover: chiusura {state.value} @ {point}")
                 self._tap(point)
                 continue
-            # fallback: apri e chiudi il menu Build (pulisce i pannelli info)
+            if state is not ScreenState.UNKNOWN:
+                self.log(f"recover: stato {state.value} senza via di chiusura sicura")
+                return False
+            # fallback SOLO per stato sconosciuto: apri e chiudi il menu Build (pulisce i
+            # pannelli info). Mai in PREVIEW/BATTLE/altri stati noti: il pulsante Build può
+            # sovrapporsi a "Next" o ad altri bottoni che spendono.
             button = ui.find_build_button(image)
             if button is None:
                 self.log(f"recover: stato {state.value} senza via di chiusura sicura")

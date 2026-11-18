@@ -7,6 +7,8 @@ import sys
 import time
 from pathlib import Path
 
+from cocbot import __version__
+
 
 def _print_windows(window_module, win32, windows) -> None:
     header = f"{'PROCESS':<14}{'CLASS':<28}{'TITLE':<44}{'CLIENT':<12}{'DPI':<6}{'ASPECT':<8}"
@@ -193,11 +195,20 @@ def cmd_input_test(args: argparse.Namespace) -> int:
 
 
 def cmd_gui(args: argparse.Namespace) -> int:
-    from cocbot.gui.app import load_default_config, run_gui
+    from cocbot.gui.app import find_config_path, load_default_config, run_gui
 
+    config_path = find_config_path()
     config = load_default_config()
-    print(f"GUI: config caricata (profilo {config.profile_name})")
-    return run_gui(config, selftest_s=args.selftest, auto_start=args.autostart)
+    label = str(config_path) if config_path is not None else "predefinita (in memoria)"
+    print(f"GUI: config {label} · profilo {config.profile_name}")
+    return run_gui(
+        config,
+        selftest_s=args.selftest,
+        auto_start=args.autostart,
+        screenshots_dir=args.screenshot_dir,
+        hidden=args.hidden,
+        config_path=config_path,
+    )
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -465,7 +476,8 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
 
 def cmd_attack_scan(args: argparse.Namespace) -> int:
     """Apre il menu Battle e legge gli elementi principali. Sola lettura: nessun raid."""
-    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+    from cocbot.app.attack_engine import AttackEngine
+    from cocbot.app.upgrade_engine import UpgradeEngineError
 
     _, engine = _load_engine(args.config, AttackEngine)
     try:
@@ -480,7 +492,7 @@ def cmd_attack_scan(args: argparse.Namespace) -> int:
             print(f"  nota: {note}")
         print("\nNessuna battaglia avviata: comando di sola lettura (non preme 'Find a Match').")
         return 0
-    except AttackEngineError as exc:
+    except UpgradeEngineError as exc:
         print(f"ERRORE engine: {exc}")
         return 1
     finally:
@@ -493,7 +505,9 @@ def cmd_attack_scout(args: argparse.Namespace) -> int:
     Senza ``--allow-spend`` e' un dry-run: apre solo menu Battle e pannello My Army (nessuna
     spesa). Con ``--allow-spend`` preme "Attack!" (ricerca base, ~1100 oro) e legge il loot.
     """
-    from cocbot.app.attack_engine import AttackEngine, AttackEngineError, evaluate_loot_from_config
+    from cocbot.app.attack_engine import AttackEngine, evaluate_loot_from_config
+    from cocbot.app.upgrade_engine import UpgradeEngineError
+    from cocbot.vision.ocr import OcrUnavailable
 
     _, engine = _load_engine(args.config, AttackEngine)
     try:
@@ -525,8 +539,12 @@ def cmd_attack_scout(args: argparse.Namespace) -> int:
         hud = engine.read_hud(engine.grab())
         print(f"HUD dopo: {hud}")
         return 0
-    except AttackEngineError as exc:
+    except UpgradeEngineError as exc:
         print(f"ERRORE engine: {exc}")
+        return 1
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
         return 1
     finally:
         engine.close()
@@ -539,7 +557,9 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
     Con ``--allow-spend`` ogni ricerca/"Next" costa ~1100 oro e ``--max-searches`` limita il
     numero di ricerche (tetto di spesa). Deploy: ``--dragons`` draghi + eroi (``--no-heroes``).
     """
-    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+    from cocbot.app.attack_engine import AttackEngine
+    from cocbot.app.upgrade_engine import UpgradeEngineError
+    from cocbot.vision.ocr import OcrUnavailable
 
     _, engine = _load_engine(args.config, AttackEngine)
     try:
@@ -595,8 +615,12 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
         if report.get("report_path"):
             print(f"  report telemetria: {report['report_path']}")
         return 0
-    except AttackEngineError as exc:
+    except UpgradeEngineError as exc:
         print(f"ERRORE engine: {exc}")
+        return 1
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
         return 1
     finally:
         engine.close()
@@ -608,7 +632,9 @@ def cmd_attack_farm(args: argparse.Namespace) -> int:
     Il farm si ferma se un ciclo non porta a un attacco (es. storage piene senza dark),
     oppure prima di superare ``--max-gold-spend`` (≈1100 oro per ricerca/Next).
     """
-    from cocbot.app.attack_engine import AttackEngine, AttackEngineError
+    from cocbot.app.attack_engine import AttackEngine
+    from cocbot.app.upgrade_engine import UpgradeEngineError
+    from cocbot.vision.ocr import OcrUnavailable
 
     _, engine = _load_engine(args.config, AttackEngine)
     try:
@@ -644,7 +670,65 @@ def cmd_attack_farm(args: argparse.Namespace) -> int:
         if report.get("report_path"):
             print(f"  report telemetria: {report['report_path']}")
         return 0
-    except AttackEngineError as exc:
+    except UpgradeEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
+        return 1
+    finally:
+        engine.close()
+
+
+def cmd_hud(args: argparse.Namespace) -> int:
+    """Legge stato schermo e HUD (risorse/builder) senza inviare alcun input.
+
+    Sola lettura: nessun tap, nessuna spesa. Con ``--json`` stampa una riga JSON
+    interpretabile dalla GUI.
+    """
+    from cocbot.app.upgrade_engine import UpgradeEngineError
+    from cocbot.vision.ocr import OcrUnavailable
+    from cocbot.vision.states import describe
+
+    _, engine = _load_engine(args.config)
+    try:
+        image = engine.grab()
+        state = engine.state(image)
+        hud = engine.read_hud(image)
+        payload = {
+            "state": str(getattr(state, "value", state)),
+            "home": str(getattr(state, "value", state)) == "home",
+            "hud": {
+                "gold": hud.gold,
+                "elixir": hud.elixir,
+                "dark": hud.dark,
+                "gems": hud.gems,
+                "builders_available": hud.builders_available,
+                "builders_total": hud.builders_total,
+            },
+            "notes": list(hud.notes),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+            return 0
+
+        def fmt(value: int | None) -> str:
+            return "?" if value is None else f"{value:,}".replace(",", " ")
+
+        print("== HUD (sola lettura) ==")
+        print(f"  stato schermo: {getattr(state, 'value', state)} ({describe(state)})")
+        print(f"  oro: {fmt(hud.gold)}  elisir: {fmt(hud.elixir)}  dark: {fmt(hud.dark)}  gemme: {fmt(hud.gems)}")
+        print(f"  builder: {fmt(hud.builders_available)}/{fmt(hud.builders_total)}")
+        for note in hud.notes:
+            print(f"  nota: {note}")
+        print("\nNessun input inviato: lettura di sola lettura.")
+        return 0
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
+        return 1
+    except UpgradeEngineError as exc:
         print(f"ERRORE engine: {exc}")
         return 1
     finally:
@@ -656,7 +740,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="cocbot",
         description="cocbot - automazione visiva Clash of Clans (uso didattico; viola i ToS Supercell).",
     )
-    parser.add_argument("--version", action="version", version="cocbot 0.1.0")
+    parser.add_argument("--version", action="version", version=f"cocbot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     probe = sub.add_parser("probe", help="elenca finestre GPGPC e stato del gioco (sola lettura)")
@@ -689,9 +773,22 @@ def build_parser() -> argparse.ArgumentParser:
     input_test.add_argument("--execute", action="store_true", help="invia davvero il click (default: dry-run)")
     input_test.set_defaults(func=cmd_input_test)
 
-    gui = sub.add_parser("gui", help="GUI minimale: Start/Stop, hotkey globale Ctrl+Alt+L, stato e avvisi")
+    gui = sub.add_parser(
+        "gui",
+        help="apre la GUI: pannello stato, Battaglia, Upgrade, Registro e Sicurezza (hotkey globali)",
+    )
     gui.add_argument("--selftest", type=float, default=None, help="apre la GUI e la chiude dopo N secondi")
     gui.add_argument("--autostart", action="store_true", help="avvia il bot all'apertura della GUI")
+    gui.add_argument(
+        "--screenshot-dir",
+        default=None,
+        help="(selftest) salva uno screenshot per ogni pagina in questa cartella (audit visivo)",
+    )
+    gui.add_argument(
+        "--hidden",
+        action="store_true",
+        help="apre la GUI senza mostrare la finestra e senza hotkey (test automatici)",
+    )
     gui.set_defaults(func=cmd_gui)
 
     bench = sub.add_parser("bench", help="misura impatto del bot (FPS cattura, CPU, RAM) in sola lettura")
@@ -827,6 +924,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="tetto di spesa stimata in oro per l'intero farm (1100 per ricerca/Next)",
     )
     attack_farm.set_defaults(func=cmd_attack_farm)
+
+    hud = sub.add_parser(
+        "hud",
+        help="legge stato schermo e risorse/builder (sola lettura: nessun tap, nessuna spesa)",
+    )
+    hud.add_argument("--config", default="config/config.example.yaml")
+    hud.add_argument("--json", action="store_true", help="output JSON (una riga, per la GUI)")
+    hud.set_defaults(func=cmd_hud)
 
     return parser
 

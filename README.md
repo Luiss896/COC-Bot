@@ -21,8 +21,8 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Zero interferenza** | **Validato**: WGC cattura anche coperta (47,4 FPS, 0 neri) e i click via messaggi aprono/chiudono pannelli **senza cambiare foreground né cursore**. |
 | **Vincolo finestra** | Il gioco **non deve essere minimizzato** (WGC non cattura finestre minimizzate): il bot va in pausa. Coperta sì; **fullscreen verificato** (client 2452×1379, offset frame (0,29), mappatura tap corretta) ma occupa tutto lo schermo → per girare mentre lavori meglio la finestra. |
 | **Anti-ban/humanization** | Ritmi variabili, pause random, tap a vuoto **solo su erba vuota** (mai gemme/shop), rate limit, avvisi anti-ban in GUI; **non garantisce** l'immunità dal ban. Vedi [ADR-003](docs/ADR-003-humanization-antiban.md). |
-| **GUI/kill switch** | GUI minimale (tkinter): Start/Stop, stato e avvisi; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch; `F12` è occupato da un'altra app su questo PC). |
-| **Limiti** | **Nessuno di default** (sessione illimitata); limiti solo se impostati dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
+| **GUI/kill switch** | GUI tkinter ridisegnata (tema scuro): pannelli **Panoramica / Battaglia / Upgrade / Registro / Sicurezza**, stato gioco+HUD, costo massimo stimato e **conferma obbligatoria per ogni spesa**; hotkey globali **`Ctrl+Alt+L`** (start/stop) e **`Ctrl+Alt+K`** (kill switch che ferma anche il task CLI; `F12` è occupato da un'altra app su questo PC). |
+| **Limiti** | **Nessuno di default** (sessione illimitata). I limiti `safety.max_*` sono in config e stampati da `config-check`, ma **non sono ancora applicati automaticamente** dagli engine: i tetti di spesa effettivi sono `--max-searches`/`--max-gold-spend`/`--max-*`, impostabili dalla GUI. **Auto-stop** quando non c'è più nulla da fare: mura max + tutti i muratori occupati + risorse max. |
 | **Builder/mura** | Preset **A**: 1 builder libero riservato alle mura (upgrade istantaneo); passaggio automatico a **B** quando tutte le mura sono max (tutti i builder lavorano). **Implementato nel planner** (`walls.*`: note di piano, limite builder per edifici/eroi, auto-stop a mura max). |
 | **Upgrade (flusso)** | Primario dal **menu Build → "Buildings & Heroes"**: catalogo nativo (nome, livello, costo, valuta, tempo), **eroi inclusi**. Engine: legge la lista, filtra per priorità/riserve/builder, conferma solo "Upgrade" (mai "Finish Now"/gemme). **Mura validate a runtime** (riga Wall → pannello azioni → Upgrade oro **o** elisir → dialogo conferma → CONFIRM; un muro reale potenziato 12→13 con verifica risorse). **Upgrade classico (edificio/eroe) validato a runtime** (riga catalogo → dialogo di conferma → CONFIRM; Air Bomb: oro −37 500; Barbarian King: dark −44 000; builder consumato, gemme invariate). Vedi [ADR-004](docs/ADR-004-vision-ocr-engine-upgrade.md). |
 | **Priorità upgrade** | Scelta utente (3 nov): **mura → difese → offensiva → eroi → risorse → other** (`upgrade.priority`); mura attive di default (`upgrade.include_walls: true`) con limite `walls.max_wall_batches_per_cycle` e budget cumulativo con riserve per valuta. |
@@ -39,7 +39,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **POC WGC ≥10 FPS**: 47,4 FPS sulla finestra anche coperta, 0 frame neri (vedi ADR-002)
 - [x] **POC input non invasivo**: click via messaggi Win32 senza focus/cursore; apre e chiude pannelli
 - [x] **Moduli produzione**: `WgcScreenSource` (crop area client) + `WinMsgSink` (coordinate canoniche), CLI aggiornata, test
-- [x] **GUI minimale** (tkinter): Start/Stop, hotkey `Ctrl+Alt+L` / kill switch `Ctrl+Alt+K`, stato e avvisi anti-ban; **pannello Attacco** (dry-run raid / scout loot / raid reale con ricerche max, spell, eroi, cap storage) e **pannello Planner** (scansione + piano dry-run; esecuzione target `--only` con dialog di conferma spesa) che lanciano le CLI in un thread e ne mostrano l'output nel log
+- [x] **GUI ridisegnata (18 nov 2026, tkinter)**: pannelli **Panoramica** (stato gioco/bot/cattura, risorse HUD, attività in corso), **Battaglia** (simulazione gratis, scout loot, raid reale, farm: parametri con costo massimo stimato e conferma), **Upgrade** (analisi sola lettura, tetti di spesa, target/piano con conferma), **Registro** (filtri + esporta) e **Sicurezza** (regole, FERMA TUTTO, config attiva). Le CLI girano in un sottoprocesso **annullabile** (kill switch o chiusura finestra: mai processi orfani) e usano la config del repo anche con cwd diversa. Aggiunti `gui --screenshot-dir` per l'audit visivo, il comando `hud` (sola lettura) e **66 nuovi test** (GUI headless, runner, tema/contrasto WCAG, config, HUD, regressioni engine): **240 test verdi**
 - [x] **Humanization/anti-ban**: ritmi variabili, pause random, tap a vuoto solo su erba vuota, rate limit, avvisi
 - [x] **Impatto misurato** (`bench`): **6,6% di un core**, ~74 MB RAM, cattura 5 FPS → non interferisce
 - [x] **Fullscreen verificato**: client 2452×1379, frame WGC 2452×1408, crop (0,29), mappatura tap corretta (match 0,967)
@@ -64,7 +64,7 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [ ] Dataset completo (~15 stati: Hero Hall, Army Recipe, eventi)
 - [ ] Loop attacco completo (skip reale + deploy dragon spam affidabile + esiti)
 - [x] **Wall bulk** (`Upgrade MORE`/`Select ROW`): **valutato e NON supportato** — decisione motivata e condizioni per introdurlo in [ADR-006](docs/ADR-006-bulk-walls-decisione.md); si aggiornano al massimo `walls.max_wall_batches_per_cycle` muri per ciclo, uno alla volta
-- [ ] GUI PySide6 completa
+- [ ] GUI PySide6: non necessaria (la GUI tkinter è stata ridisegnata con tema scuro e 5 pannelli); da valutare solo su richiesta esplicita dell'utente
 
 ## Quick start
 
@@ -87,8 +87,13 @@ python -m cocbot input-test --x 960 --y 540
 # 5) misura l'impatto del bot (CPU/RAM/FPS, sola lettura)
 python -m cocbot bench --seconds 20 --fps 5
 
-# 6) GUI minimale: Start/Stop + hotkey Ctrl+Alt+L / kill switch Ctrl+Alt+K
+# 6) GUI: Panoramica / Battaglia / Upgrade / Registro / Sicurezza
+#    hotkey Ctrl+Alt+L start/stop, Ctrl+Alt+K kill switch; conferma su ogni spesa
 python -m cocbot gui
+python -m cocbot gui --selftest 3                 # apre e chiude da sola (test rapido)
+python -m cocbot gui --selftest 6 --screenshot-dir out/gui-audit  # audit visivo delle pagine
+python -m cocbot hud                              # HUD risorse (sola lettura, nessun input)
+python -m cocbot hud --json                       # output JSON per la GUI
 
 # 7) scansiona il menu Build e stampa il piano di upgrade (SOLA LETTURA, nessuna spesa)
 python -m cocbot upgrade-scan                # report JSON in out/upgrade/
@@ -121,13 +126,38 @@ python -m cocbot attack-farm --allow-spend --cycles 2 --max-gold-spend 2200  # f
 > PNG e log restano in `out/` (ignorata da git). Nota: `windows-capture` richiede un processo a
 > integrità media (avvia il bot normalmente, non dentro sandbox/AppContainer).
 
+## GUI (ridisegnata il 18 novembre 2026)
+
+Cinque pannelli, tutti in italiano e con spiegazioni in linea:
+
+- **Panoramica**: stato di gioco/bot/cattura, risorse HUD (`Leggi HUD` è sola lettura), attività
+  in corso con *Annulla*, avvio rapido (`Rileva gioco`, `Leggi HUD`, `Avvia/Ferma bot`).
+- **Battaglia**: parametri (ricerche max, spell, draghi, early-exit, eroi, cap storage) con
+  **costo massimo stimato** sempre visibile; azioni **Simulazione (gratis)**, **Scout loot**,
+  **Raid reale**, **Farm**; le tre che spendono chiedono conferma con il costo stimato.
+- **Upgrade**: analisi in sola lettura, tetti di spesa (`max oro/elisir/dark/upgrade`), esecuzione
+  target (`--only`) o piano completo, sempre con conferma esplicita.
+- **Registro**: log colorato filtrabile (testo + livello), auto-scroll, esportazione su file.
+- **Sicurezza**: regole non negoziabili, **FERMA TUTTO** (bot + task CLI), configurazione attiva
+  e avvertenza ToS.
+
+Regole di sicurezza della GUI: le simulazioni non spendono nulla; ogni spesa vera richiede una
+conferma con il costo stimato; il **kill switch** (pulsante o `Ctrl+Alt+K`) ferma il bot **e
+annulla il task CLI**; chiudere la finestra durante un task chiede conferma e lo annulla (nessun
+processo orfano). Le azioni girano come CLI separate (`python -m cocbot ...`) e usano la config
+del repo anche se la GUI è avviata da un'altra directory.
+
+Test automatici della GUI: `python -m pytest tests/test_gui_app.py tests/test_gui_tasks.py -q`
+(finestra nascosta, nessun gioco richiesto). Audit visivo:
+`python -m cocbot gui --selftest 6 --screenshot-dir out/gui-audit` (richiede un desktop).
+
 ## Struttura
 
 ```text
 config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrade, mura, GUI, humanize)
 src/cocbot/
   __main__.py                CLI: probe | capture | input-test | gui | bench | config-check | adb-check
-                             | upgrade-scan | upgrade-run | attack-scan | attack-scout
+                             | hud | upgrade-scan | upgrade-run | attack-scan | attack-scout
   app/controller.py          ciclo start/stop, cattura, pause, tap a vuoto umanizzati
   app/upgrade_engine.py      engine upgrade: HUD, scansione menu Build, planner, esecuzione verificata
   app/attack_engine.py       loop attacco: menu Battle, My Army, anteprima base (loot OCR) + policy
@@ -140,7 +170,9 @@ src/cocbot/
   vision/ui.py               primitive UI: pulsanti, X, CONFIRM, modal inattività, pannello righe
   vision/build_menu.py       lettura righe menu Build (livello/tempo/costo/valuta) + dialogo conferma
   vision/states.py           classifier stato schermo (home/battle_menu/army_review/preview/build_menu/...)
-  gui/                       GUI minimale tkinter + hotkey globali
+  gui/                       GUI completa tkinter: app.py (5 pannelli), theme.py (tema scuro/chiaro),
+                             widgets.py (card/log/pill/tooltip), tasks.py (runner CLI annullabile),
+                             formatting.py (formattazioni), hotkey.py (hotkey globali)
   capture/
     win32.py                 wrapper ctypes (DPI, finestre, input SendInput e messaggi Win32)
     window.py                scoperta finestra gioco + coordinate canoniche
@@ -156,7 +188,9 @@ docs/ADR-005-...             loop attacco: menu Battle, My Army e anteprima base
 docs/ADR-006-...             bulk walls: valutazione e decisione (non supportato in v1, condizioni)
 tests/                       unit test (config, coordinate, WGC crop, winmsg, humanize, GUI hotkey,
                              vision/parser, dataset reale locale, planner/merge upgrade, pannello muro,
-                             menu Battle + My Army + anteprima base + loot OCR + policy attacco)
+                             menu Battle + My Army + anteprima base + loot OCR + policy attacco,
+                             GUI headless (navigazione/conferme/kill switch/runner), tema e contrasto
+                             WCAG, config path, comando hud, regressioni engine)
 tools/                       record_session.py (dataset), poc_wgc.py, poc_bg_input.py
 dataset/                     sessioni dataset locali (IGNORATA da git: contiene dati account)
 ```
