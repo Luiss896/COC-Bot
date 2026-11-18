@@ -445,6 +445,7 @@ def build_plan(config: Config, report: ScanReport, *, only: str | None = None) -
     reserves = config.upgrade.reserves or {}
     ignore = {str(item).lower() for item in config.upgrade.ignore_categories}
 
+    minimum_cost = max(0, int(config.upgrade.min_plausible_cost))
     for row in report.rows:
         category = categorize(row.name)
         if category is None:
@@ -471,6 +472,11 @@ def build_plan(config: Config, report: ScanReport, *, only: str | None = None) -
             continue
         if row.cost is None:
             plan.skipped.append(SkippedRow(row, "costo illeggibile"))
+            continue
+        if row.cost < minimum_cost:
+            plan.skipped.append(
+                SkippedRow(row, f"costo implausibile ({row.cost}): probabile errore OCR, scartato")
+            )
             continue
         if row.currency not in ("gold", "elixir", "dark"):
             plan.skipped.append(SkippedRow(row, f"valuta non gestita: {row.currency}"))
@@ -1061,12 +1067,23 @@ class UpgradeEngine:
                 for candidate in plan.chosen
             ]
         results: list[ExecutionResult] = []
+        consecutive_errors = 0
         for candidate in plan.chosen:
             try:
-                results.append(self._execute_upgrade(candidate))
-            except (UpgradeEngineError, ocr_module.OcrUnavailable) as exc:  # pragma: no cover - dipende dal gioco
-                results.append(ExecutionResult(row=candidate.row, ok=False, reason=str(exc)))
-                break
+                result = self._execute_upgrade(candidate)
+            except (UpgradeEngineError, ocr_module.OcrUnavailable) as exc:  # pragma: no cover - live
+                result = ExecutionResult(row=candidate.row, ok=False, reason=str(exc))
+                consecutive_errors += 1
+                self.log(f"esecuzione: '{candidate.row.name}' fallito: {exc}")
+                # riprova a tornare in home per il prossimo candidato invece di abortire tutto
+                self.recover_home()
+                results.append(result)
+                if consecutive_errors >= 2:
+                    self.log("esecuzione: due errori consecutivi, interrompo il ciclo")
+                    break
+                continue
+            consecutive_errors = 0
+            results.append(result)
         return results
 
     def _find_row_live(self, target: build_menu.BuildRow, *, max_pages: int = 40) -> build_menu.BuildRow | None:
@@ -1166,13 +1183,21 @@ class UpgradeEngine:
             problems.append(f"nome dialogo {dialog.name!r} non contiene 'wall'")
         if expected_level is not None and dialog.target_level is not None and dialog.target_level != expected_level:
             problems.append(f"livello dialogo {dialog.target_level} diverso da {expected_level}")
-        if dialog.cost is None or dialog.cost != cost:
-            problems.append(f"costo dialogo {dialog.cost} diverso da {cost}")
+        cost_decision = dialog_cost_decision(
+            cost,
+            dialog.cost,
+            available=before.amount(button.currency),
+            reserve=int((self.config.upgrade.reserves or {}).get(button.currency, 0)),
+        )
+        if not cost_decision.ok:
+            problems.append(cost_decision.warning or "costo dialogo non valido")
         if problems:
             if dialog.close_point is not None:
                 self._tap(dialog.close_point)
             self.recover_home()
             raise UpgradeEngineError("dialogo muro non corrispondente: " + "; ".join(problems))
+        if cost_decision.warning:
+            self.log(f"muro: {cost_decision.warning}")
         confirm_rect = dialog.confirm_rect or ui.find_confirm_button(dialog_image)
         if confirm_rect is None:
             self.recover_home()
@@ -1190,10 +1215,16 @@ class UpgradeEngine:
         available_before = before.amount(currency)
         available_after = after.amount(currency)
         delta = None if available_before is None or available_after is None else available_before - available_after
-        if self.config.upgrade.verify_after_upgrade and (delta is None or delta != cost):
-            raise UpgradeEngineError(
-                f"verifica muro fallita: {currency} {available_before}->{available_after}, atteso -{cost}"
-            )
+        if self.config.upgrade.verify_after_upgrade:
+            if delta is not None and delta == 0:
+                raise UpgradeEngineError(
+                    f"verifica muro fallita: {currency} {available_before}->{available_after}, nessuna spesa"
+                )
+            if delta is not None and delta != cost:
+                self.log(
+                    f"muro: spesa rilevata {delta} {currency} (attesa -{cost}): "
+                    "probabile reddito/errore OCR, upgrade confermato"
+                )
         return ExecutionResult(
             row=row,
             ok=True,
@@ -1241,14 +1272,22 @@ class UpgradeEngine:
             problems.append(f"nome dialogo {dialog.name!r} diverso da {row.name!r}")
         if expected_level is not None and dialog.target_level is not None and dialog.target_level != expected_level:
             problems.append(f"livello dialogo {dialog.target_level} diverso da {expected_level}")
-        if dialog.cost is None or dialog.cost != cost:
-            problems.append(f"costo dialogo {dialog.cost} diverso da {cost}")
+        cost_decision = dialog_cost_decision(
+            cost,
+            dialog.cost,
+            available=before.amount(row.currency),
+            reserve=int((self.config.upgrade.reserves or {}).get(row.currency, 0)),
+        )
+        if not cost_decision.ok:
+            problems.append(cost_decision.warning or "costo dialogo non valido")
         if problems:
             point = dialog.close_point
             if point is not None:
                 self._tap(point)
             self.recover_home()
             raise UpgradeEngineError("dialogo non corrispondente: " + "; ".join(problems))
+        if cost_decision.warning:
+            self.log(f"upgrade: {cost_decision.warning}")
         confirm_rect = dialog.confirm_rect or ui.find_confirm_button(dialog_image)
         if confirm_rect is None:
             raise UpgradeEngineError("pulsante CONFIRM non trovato")
@@ -1270,8 +1309,11 @@ class UpgradeEngine:
                 and available_after is not None
                 and available_after > available_before - cost
             ):
-                raise UpgradeEngineError(
-                    f"verifica fallita: {row.currency} {available_before}->{available_after}, atteso -{cost}"
+                # builder consumato = upgrade avvenuto; il saldo può non riflettere -cost
+                # perché nel frattempo il villaggio ha prodotto reddito. Non è un errore.
+                self.log(
+                    f"verifica risorse: {row.currency} {available_before}->{available_after} "
+                    f"non mostra -{cost} (reddito tra le letture?); verifica builder ok"
                 )
         return ExecutionResult(
             row=row,
@@ -1280,6 +1322,50 @@ class UpgradeEngine:
             dialog_cost=dialog.cost,
             hud_after=after,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DialogCostDecision:
+    """Esito del confronto costo riga vs costo dialogo: l'OCR può sbagliare uno dei due."""
+
+    ok: bool
+    trusted_cost: int | None = None
+    warning: str | None = None
+
+
+def dialog_cost_decision(
+    row_cost: int | None,
+    dialog_cost: int | None,
+    *,
+    available: int | None,
+    reserve: int = 0,
+) -> DialogCostDecision:
+    """Decide se procedere quando costo riga e costo dialogo non coincidono.
+
+    Nei log reali l'OCR ha letto ``2`` oro per un trap che ne costava ``2500`` e ``1500``
+    per un muro che ne costava ``1_500_000``. Il dialogo è la fonte più affidabile, ma per
+    sicurezza si usa ``max(row_cost, dialog_cost)`` come tetto di spesa e si procede solo se
+    il budget disponibile lo copre (con la riserva della config).
+    """
+    if row_cost is None or row_cost <= 0:
+        return DialogCostDecision(False, None, "costo riga non disponibile")
+    if dialog_cost is None:
+        return DialogCostDecision(False, None, "costo dialogo non leggibile")
+    if dialog_cost == row_cost:
+        return DialogCostDecision(True, row_cost, None)
+    worst = max(row_cost, dialog_cost)
+    if available is not None and available < worst + reserve:
+        return DialogCostDecision(
+            False,
+            None,
+            f"costo incerto (riga {row_cost} vs dialogo {dialog_cost}) oltre il budget "
+            f"disponibile {available}",
+        )
+    return DialogCostDecision(
+        True,
+        worst,
+        f"costo incerto (riga {row_cost} vs dialogo {dialog_cost}): procedo con tetto prudente {worst}",
+    )
 
 
 def save_json(path: str | Path, payload: dict) -> Path:

@@ -462,7 +462,15 @@ def cmd_upgrade_run(args: argparse.Namespace) -> int:
             },
         )
         print(f"\nreport salvato: {path}")
-        return 0 if all(result.ok for result in results) else 1
+        ok_count = sum(1 for result in results if result.ok)
+        failed = [result for result in results if not result.ok]
+        if results:
+            print(f"Riepilogo esecuzione: {ok_count}/{len(results)} upgrade riusciti")
+        if failed and not ok_count:
+            return 1
+        if failed:
+            print("RISULTATO PARZIALE: alcuni upgrade sono falliti, vedi le righe FALLITO sopra.")
+        return 0
     except OcrUnavailable as exc:
         print(f"ERRORE OCR: {exc}")
         print("Installa l'extra OCR: python -m pip install -e .[ocr]")

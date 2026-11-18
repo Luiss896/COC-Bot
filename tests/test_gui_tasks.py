@@ -67,14 +67,15 @@ def test_runner_streams_output_and_finishes() -> None:
     assert events[-1].exit_code == 0
     lines = [event.line for event in events if event.kind == "line"]
     assert lines == ["riga 1", "riga 2"]
-    assert created["command"][:3] == ["python-test", "-m", "cocbot"]
-    assert created["command"][3:] == ["probe", "--json"]
+    assert created["command"][:4] == ["python-test", "-u", "-m", "cocbot"]
+    assert created["command"][4:] == ["probe", "--json"]
+    assert events[0].arguments == ("probe", "--json")
     assert created["kwargs"]["cwd"] == str(REPO_ROOT)
     assert created["kwargs"]["text"] is True
     assert created["kwargs"]["encoding"] == "utf-8"
     assert created["kwargs"]["errors"] == "replace"
     assert runner.preview_for(["hud", "--json"]) == "python -m cocbot hud --json"
-    assert runner.command_for(["hud"]) == ("python-test", "-m", "cocbot", "hud")
+    assert runner.command_for(["hud"]) == ("python-test", "-u", "-m", "cocbot", "hud")
 
 
 def test_runner_reports_start_error() -> None:

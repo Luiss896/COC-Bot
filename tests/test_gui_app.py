@@ -84,7 +84,12 @@ class FakeRunner:
         arguments = [str(argument) for argument in arguments]
         self.starts.append((arguments, label))
         self.queue.put(
-            TaskEvent("started", label=label, command=("python", "-m", "cocbot", *arguments))
+            TaskEvent(
+                "started",
+                label=label,
+                command=("python", "-u", "-m", "cocbot", *arguments),
+                arguments=tuple(arguments),
+            )
         )
         return True
 
@@ -356,6 +361,30 @@ def test_probe_payload_updates_dashboard(gui: GuiHarness) -> None:
     assert "rilevato" in gui.app.footer_game_var.get()
     assert "gioco rilevato" in gui.log_text().lower()
     assert str(gui.app.buttons["probe_game"]["state"]) == "normal"
+
+
+def test_probe_multiline_json_updates_dashboard(gui: GuiHarness) -> None:
+    """Simula l'output reale di probe --json (indentato): prima falliva la lettura."""
+    gui.app.buttons["probe_game"].invoke()
+    for line in (
+        "{",
+        '  "game": {',
+        '    "process": "crosvm.exe",',
+        '    "client_size": [',
+        "      1733,",
+        "      975",
+        "    ],",
+        '    "is_16_9": true',
+        "  },",
+        '  "launcher": null',
+        "}",
+    ):
+        gui.runner.emit_line(line)
+    gui.runner.finish()
+    gui.app.tick()
+    assert "GIOCO RILEVATO" in gui.app.game_pill.cget("text")
+    assert gui.app.game_values["window"].get() == "1733×975"
+    assert "output non interpretabile" not in gui.log_text()
 
 
 def test_hud_payload_updates_resources(gui: GuiHarness) -> None:

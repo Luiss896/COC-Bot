@@ -113,6 +113,16 @@ _TARGET_SUGGESTIONS = (
 _LOG_REPORT_RE = re.compile(r"report salvato:\s*(?P<path>.+\.json)\s*$", re.MULTILINE)
 
 
+def _looks_like_json_line(line: str) -> bool:
+    """True per le righe di JSON (indentato o singola riga) da non riversare nel registro."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped[0] in "{}[]\"":
+        return True
+    return stripped.endswith((",", "[", "{", ":"))
+
+
 class ControllerLike(Protocol):
     """Interfaccia minima del controller usata dalla GUI (iniettabile nei test)."""
 
@@ -1405,7 +1415,8 @@ class CocbotApp:
 
     def _on_task_event(self, event: TaskEvent) -> None:
         if event.kind == "started":
-            self.log(f"▶ {event.label}: {self.command_preview(event.command[3:])}", "task")
+            display = event.arguments or event.command[4:]
+            self.log(f"▶ {event.label}: {self.command_preview(display)}", "task")
             if self.task_progress is not None:
                 self.task_progress.configure(mode="indeterminate")
                 self.task_progress.start(14)
@@ -1416,7 +1427,10 @@ class CocbotApp:
             return
         if event.kind == "line":
             self._task_output.append(event.line)
-            self.log(event.line, self.classify_line(event.line))
+            # probe/hud in --json producono JSON: non inondare il registro (il payload viene
+            # riepilogato da _apply_probe_payload/_apply_hud_payload).
+            if self._current_action not in ("probe", "hud") or not _looks_like_json_line(event.line):
+                self.log(event.line, self.classify_line(event.line))
             return
 
         if self.task_progress is not None:
@@ -1440,7 +1454,8 @@ class CocbotApp:
             self._handle_task_result(event)
             if not ok:
                 output = "\n".join(self._task_output).upper()
-                if "OCR" in output:
+                # attenzione: i log di RapidOCR contengono "OCR" ma non sono errori.
+                if "ERRORE OCR" in output or "OCR NON DISPONIBILE" in output:
                     self.log(
                         "suggerimento: OCR non disponibile → python -m pip install -e .[ocr]",
                         "muted",

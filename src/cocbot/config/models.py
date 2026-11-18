@@ -182,6 +182,9 @@ class UpgradeConfig(BaseModel):
     dry_run: bool = True
     ignore_categories: list[str] = Field(default_factory=list)
     verify_after_upgrade: bool = True
+    # costi sotto questa soglia sono considerati errori OCR (es. un trap da 2 oro):
+    # un upgrade reale di un TH13 costa almeno centinaia di migliaia di risorse.
+    min_plausible_cost: int = Field(default=500, ge=0, le=1_000_000)
     max_scan_scrolls: int = Field(default=45, ge=5, le=80)
 
 

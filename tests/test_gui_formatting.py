@@ -55,6 +55,28 @@ def test_parse_last_json_object() -> None:
     assert formatting.parse_last_json_object("{\"rotto\": }") is None
 
 
+def test_parse_last_json_object_multiline_probe_output() -> None:
+    """Il probe reale stampa JSON indentato su più righe (bug visto nel log 18 nov)."""
+    output = """finestra: crosvm.exe
+{
+  "game": {
+    "process": "crosvm.exe",
+    "client_size": [
+      1733,
+      975
+    ],
+    "is_16_9": true
+  },
+  "launcher": null
+}
+"""
+    payload = formatting.parse_last_json_object(output)
+    assert payload is not None
+    assert payload["game"]["client_size"] == [1733, 975]
+    assert payload["game"]["is_16_9"] is True
+    assert payload["launcher"] is None
+
+
 def test_game_state_label() -> None:
     assert formatting.game_state_label("home") == "Home"
     assert formatting.game_state_label("battle") == "Battaglia in corso"

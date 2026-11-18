@@ -33,6 +33,7 @@ class TaskEvent:
     exit_code: int | None = None
     duration_s: float = 0.0
     command: tuple[str, ...] = ()
+    arguments: tuple[str, ...] = ()
 
 
 class CliTaskRunner:
@@ -75,8 +76,12 @@ class CliTaskRunner:
         return self._command
 
     def command_for(self, extra: Sequence[str]) -> tuple[str, ...]:
-        """Comando completo (debug/log): ``python -m cocbot <extra>``."""
-        return (self.python, "-m", "cocbot", *extra)
+        """Comando completo (debug/log): ``python -u -m cocbot <extra>``.
+
+        ``-u`` è essenziale: senza, l'output del figlio arriva a blocchi e la GUI sembra
+        bloccata finché il processo non termina (osservato nei log dell'utente).
+        """
+        return (self.python, "-u", "-m", "cocbot", *extra)
 
     def preview_for(self, extra: Sequence[str]) -> str:
         """Riga compatta da mostrare nella GUI (senza percorso assoluto dell'interprete)."""
@@ -92,7 +97,14 @@ class CliTaskRunner:
         self._command = command
         self._cancel_requested = False
         self._started_at = self._clock()
-        self.queue.put(TaskEvent("started", label=label, command=command))
+        self.queue.put(
+            TaskEvent(
+                "started",
+                label=label,
+                command=command,
+                arguments=tuple(str(argument) for argument in extra),
+            )
+        )
         thread = threading.Thread(
             target=self._worker,
             args=(command, str(cwd or self.repo_root)),

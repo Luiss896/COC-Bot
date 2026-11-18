@@ -92,17 +92,18 @@ def game_state_label(state: Any) -> str:
 
 
 def parse_last_json_object(text: str) -> dict[str, Any] | None:
-    """Estrae l'ultimo oggetto JSON da un output testuale (riga per riga, dall'ultima).
+    """Estrae l'ultimo oggetto JSON da un output testuale (anche su più righe).
 
     Serve a interpretare ``probe --json``/``hud --json`` anche quando la CLI stampa prima
-    messaggi informativi. Ritorna ``None`` se non trova JSON valido.
+    messaggi informativi o quando il JSON è indentato (``json.dumps(..., indent=2)``).
+    Ritorna ``None`` se non trova JSON valido.
     """
-    for line in reversed(text.splitlines()):
-        candidate = line.strip()
-        if not candidate.startswith("{"):
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
             continue
         try:
-            payload = json.loads(candidate)
+            payload, _end = decoder.raw_decode(text[index:])
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
