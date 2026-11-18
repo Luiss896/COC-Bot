@@ -55,11 +55,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 _HOTKEY_START_STOP = 1
 _HOTKEY_KILL = 2
 
-PAGES: tuple[str, ...] = ("dashboard", "attack", "upgrade", "logs", "safety")
+PAGES: tuple[str, ...] = ("dashboard", "attack", "upgrade", "auto", "logs", "safety")
 _PAGE_TITLES = {
     "dashboard": "Panoramica",
     "attack": "Battaglia",
     "upgrade": "Upgrade",
+    "auto": "Auto",
     "logs": "Registro",
     "safety": "Sicurezza",
 }
@@ -67,6 +68,7 @@ _PAGE_SUBTITLES = {
     "dashboard": "Stato di gioco, bot e risorse in un colpo d'occhio.",
     "attack": "Raid automatici: ogni ricerca costa ~1.100 oro. Le simulazioni non spendono nulla.",
     "upgrade": "Pianifica ed esegui upgrade dal menu Build. Di default è tutto in sola lettura.",
+    "auto": "Loop unico: farm fino a depositi pieni, poi upgrade per priorità; stop con builder e depositi pieni.",
     "logs": "Tutto quello che succede: comandi, output del bot, avvisi ed errori.",
     "safety": "Regole non negoziabili, kill switch e configurazione attiva.",
 }
@@ -91,6 +93,8 @@ _ACTION_BUTTONS = (
     "upgrade_analyze",
     "upgrade_target",
     "upgrade_plan",
+    "auto_dry",
+    "auto_run",
 )
 _LEVEL_FILTERS = {"Tutti": 0, "Avvisi ed errori": 2, "Solo errori": 3}
 _TARGET_SUGGESTIONS = (
@@ -220,6 +224,7 @@ class CocbotApp:
         self._build_dashboard_page()
         self._build_attack_page()
         self._build_upgrade_page()
+        self._build_auto_page()
         self._build_logs_page()
         self._build_safety_page()
         self._bind_shortcuts()
@@ -987,6 +992,145 @@ class CocbotApp:
 
         self.page_scrolls["upgrade"].enable_mousewheel()
 
+    # ================================================================== pagina Auto
+    def _build_auto_page(self) -> None:
+        _frame, body = self._new_page("auto")
+        assert body is not None
+        palette = self.theme.palette
+
+        intro = Card(body, self.theme)
+        intro.pack(fill="x", pady=(0, 14))
+        intro.header(
+            "Come funziona AUTO",
+            "Un unico loop (mai farm e upgrade in parallelo): farm finché i depositi sono "
+            "pieni, poi upgrade per priorità; si ferma quando builder e depositi sono pieni.",
+        )
+        steps = tk.Frame(intro.body, bg=palette.card)
+        steps.pack(fill="x", pady=(4, 0))
+        for index, (title, text) in enumerate(
+            (
+                ("1 · Farm", "Raid Dragon Clone ripetuti finché oro, elisir e dark non sono al cap."),
+                ("2 · Upgrade", "Piano per priorità (mura→difese→esercito→eroi→risorse) con i tetti di spesa."),
+                ("3 · Stop", "Builder tutti occupati + depositi pieni (+ lab/famigli al lavoro, se richiesto)."),
+            )
+        ):
+            block = tk.Frame(steps, bg=palette.card)
+            block.pack(side="left", fill="x", expand=True, padx=(0, 12 if index < 2 else 0))
+            ttk.Label(block, text=title, style="CardTitle.TLabel").pack(anchor="w")
+            caption = ttk.Label(block, text=text, style="CardSub.TLabel", justify="left")
+            caption.pack(anchor="w", pady=(2, 0))
+            autowrap(caption, block)
+
+        controls = Card(body, self.theme)
+        controls.pack(fill="x", pady=(0, 14))
+        controls.header(
+            "Parametri del loop",
+            "Draghi/spell/cloni/strategia si impostano in Battaglia; i tetti di spesa in Upgrade.",
+        )
+        grid = tk.Frame(controls.body, bg=palette.card)
+        grid.pack(fill="x")
+        for column in range(3):
+            grid.columnconfigure(column, weight=1)
+        self.auto_vars = {
+            "cycles": tk.StringVar(value=str(self.config.auto.max_cycles)),
+            "require_lab_pets": tk.StringVar(
+                value="1" if self.config.auto.require_lab_and_pets else "0"
+            ),
+        }
+        ttk.Label(grid, text="Cicli max", style="Field.TLabel").grid(row=0, column=0, sticky="w")
+        cycles = ttk.Spinbox(
+            grid, from_=1, to=100, increment=1, textvariable=self.auto_vars["cycles"], width=7
+        )
+        cycles.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self._tip(cycles, "Numero massimo di azioni (un raid o un ciclo di upgrade) prima dello stop.")
+        ttk.Label(grid, text="Ricerche per raid", style="Field.TLabel").grid(
+            row=0, column=1, sticky="w", padx=(10, 0)
+        )
+        searches = ttk.Spinbox(
+            grid, from_=1, to=5, increment=1, textvariable=self.attack_vars["searches"], width=7
+        )
+        searches.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=(2, 0))
+        self._tip(searches, "Tetto ricerche per ogni raid di farm (~1.100 oro ciascuna).")
+        require = ttk.Checkbutton(
+            grid,
+            text="Richiedi lab + famigli al lavoro per lo stop (sperimentale)",
+            variable=self.auto_vars["require_lab_pets"],
+            onvalue="1",
+            offvalue="0",
+            style="Card.TCheckbutton",
+        )
+        require.grid(row=0, column=2, rowspan=2, sticky="w", padx=(10, 0))
+        self._tip(
+            require,
+            "Se attivo il bot non si ferma finché non verifica laboratorio e famigli al lavoro; "
+            "il rilevamento live non è ancora implementato (in tal caso attende).",
+        )
+        self._caption(
+            controls.body,
+            "Deploy del farm: parametri della pagina Battaglia · "
+            f"tetti upgrade attuali: {self._budget_summary()}",
+        )
+
+        actions = self._card_grid(body, columns=2)
+        dry_card = Card(actions, self.theme)
+        dry_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7), pady=(0, 7))
+        head = tk.Frame(dry_card.body, bg=palette.card)
+        head.pack(fill="x")
+        ttk.Label(head, text="Simulazione AUTO", style="CardTitle.TLabel").pack(side="left")
+        Badge(head, self.theme, "GRATIS", "free").pack(side="right")
+        self._caption(dry_card.body, "Legge HUD, decide farm/upgrade e simula un raid: nessuna spesa.")
+        self._register_action_button(
+            "auto_dry",
+            ttk.Button(
+                dry_card.body,
+                text="Simula il loop",
+                style="Accent.TButton",
+                command=self.auto_dry_run,
+            ),
+            pady=(6, 0),
+        )
+        real_card = Card(actions, self.theme)
+        real_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0), pady=(0, 7))
+        head = tk.Frame(real_card.body, bg=palette.card)
+        head.pack(fill="x")
+        ttk.Label(head, text="AUTO reale", style="CardTitle.TLabel").pack(side="left")
+        Badge(head, self.theme, "SPENDE", "spend").pack(side="right")
+        caption = ttk.Label(
+            real_card.body,
+            text=(
+                "Farm + upgrade automatici: spende oro per le ricerche e risorse per gli upgrade. "
+                "Si ferma con builder e depositi pieni (e lab/famigli se richiesto)."
+            ),
+            style="CardSub.TLabel",
+            justify="left",
+        )
+        caption.pack(anchor="w", pady=(2, 2))
+        autowrap(caption, real_card.body)
+        self._register_action_button(
+            "auto_run",
+            ttk.Button(
+                real_card.body,
+                text="Avvia AUTO (spende)",
+                style="Spend.TButton",
+                command=self.auto_run,
+            ),
+            pady=(6, 0),
+        )
+
+        status = Card(body, self.theme)
+        status.pack(fill="x", pady=(14, 0))
+        status.header("Stato AUTO")
+        label = ttk.Label(status.body, textvariable=self.task_status_var, style="Card.TLabel", justify="left")
+        label.pack(anchor="w")
+        autowrap(label, status.body)
+        self.auto_detail_var = tk.StringVar(value="Nessuna esecuzione AUTO.")
+        detail = ttk.Label(
+            status.body, textvariable=self.auto_detail_var, style="CardMuted.TLabel", justify="left"
+        )
+        detail.pack(anchor="w", pady=(4, 0))
+        autowrap(detail, status.body)
+        self.page_scrolls["auto"].enable_mousewheel()
+
     # ================================================================== pagina Registro
     def _build_logs_page(self) -> None:
         frame, _body = self._new_page("logs")
@@ -1505,10 +1649,18 @@ class CocbotApp:
                 self._apply_probe_payload(payload)
             else:
                 self._apply_hud_payload(payload)
-        elif action in ("upgrade_analyze", "upgrade_target", "upgrade_plan"):
+        elif action in ("upgrade_analyze", "upgrade_target", "upgrade_plan", "auto_run", "auto_dry"):
             match = _LOG_REPORT_RE.search(output)
             if match:
-                self.last_report_var.set(f"Report: {match.group('path').strip()}")
+                path_text = match.group("path").strip()
+                self.last_report_var.set(f"Report: {path_text}")
+                if action in ("auto_run", "auto_dry") and hasattr(self, "auto_detail_var"):
+                    self.auto_detail_var.set(f"Ultimo report AUTO: {path_text}")
+            if action in ("auto_run", "auto_dry") and hasattr(self, "auto_detail_var"):
+                for line in reversed(output.splitlines()):
+                    if line.strip().startswith("stop:"):
+                        self.auto_detail_var.set(line.strip())
+                        break
         if event.exit_code not in (0, None):
             self.log("l'uscita non è pulita: controlla le righe sopra nel Registro.", "muted")
 
@@ -1612,6 +1764,73 @@ class CocbotApp:
         if self.config_path is not None:
             result.extend(["--config", self._display_path(self.config_path)])
         return result
+
+    # ================================================================== azioni: AUTO
+    def _auto_arguments(self, *, allow_spend: bool) -> list[str] | None:
+        options = self._attack_options()
+        budgets = self._budget_args()
+        if budgets is None:
+            return None
+        cycles = formatting.clamp_int(
+            self.auto_vars["cycles"].get(),
+            default=int(self.config.auto.max_cycles),
+            minimum=1,
+            maximum=100,
+        )
+        arguments = [
+            "auto-run",
+            "--cycles",
+            str(cycles),
+            "--max-searches",
+            str(int(options["searches"])),
+            "--dragons",
+            str(int(options["dragons"])),
+            "--spells",
+            str(int(options["spells"])),
+            "--clones",
+            str(int(options["clones"])),
+            "--strategy",
+            str(options["strategy"]),
+            "--early-exit-damage",
+            str(int(options["early"])),
+        ]
+        if allow_spend:
+            arguments.append("--allow-spend")
+        if not options["heroes"]:
+            arguments.append("--no-heroes")
+        arguments.extend(budgets)
+        if self.auto_vars["require_lab_pets"].get() == "1":
+            arguments.append("--require-lab-pets")
+        return self._with_config(arguments)
+
+    def auto_dry_run(self) -> None:
+        arguments = self._auto_arguments(allow_spend=False)
+        if arguments is None:
+            return
+        self._begin_task("auto_dry", arguments, "Simulazione AUTO")
+
+    def auto_run(self) -> None:
+        options = self._attack_options()
+        lab_note = (
+            "Stop: builder tutti occupati + depositi pieni + lab/famigli al lavoro."
+            if self.auto_vars["require_lab_pets"].get() == "1"
+            else "Stop: builder tutti occupati + depositi pieni."
+        )
+        message = (
+            "Loop AUTO (farm + upgrade).\n\n"
+            f"{lab_note}\n"
+            f"Cicli max: {self.auto_vars['cycles'].get()} · ricerche per raid: {options['searches']}.\n"
+            f"Deploy: {options['dragons']} draghi + {options['clones']} cloni "
+            f"(strategia {options['strategy']}).\n"
+            f"Tetti upgrade: {self._budget_summary()}.\n\n"
+            "Questa azione SPENDE risorse reali. Continuare?"
+        )
+        if not self._confirm_spend("AUTO farm + upgrade", message):
+            return
+        arguments = self._auto_arguments(allow_spend=True)
+        if arguments is None:
+            return
+        self._begin_task("auto_run", arguments, "AUTO farm + upgrade")
 
     # ================================================================== azioni: battaglia
     def _attack_options(self) -> dict[str, int | bool | str]:

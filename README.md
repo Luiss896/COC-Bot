@@ -28,6 +28,8 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 | **Priorità upgrade** | Scelta utente (3 nov): **mura → difese → offensiva → eroi → risorse → other** (`upgrade.priority`); mura attive di default (`upgrade.include_walls: true`) con limite `walls.max_wall_batches_per_cycle` e budget cumulativo con riserve per valuta. |
 | **Disconnessione/inattività** | L'engine riconosce i modal di rete **"Connection lost / TRY AGAIN"** e **"Anyone there? / RELOAD GAME"** e **gestisce da solo** retry + attesa caricamento + ripristino finestra se minimizzata. Riconosce anche la **manutenzione del gioco** (`MAINTENANCE BREAK`) e resta in pausa senza inviare input. Nessun avvio automatico di GPGPC. |
 | **Strategia eroi (auto-battaglia)** | Opzioni pronte per il loop attacco: `attack.use_heroes` (schierare gli eroi) e `attack.heroes_require_ready` (un eroe in upgrade non è schierabile → escludi/attendi). **Loop attacco v2 validato live fino all'anteprima base**: `attack-scan` (menu Battle, sola lettura), `attack-scout` (anteprima My Army → ricerca → **OCR del loot** → decisione con soglie → "End Battle" **senza deploy**). Deploy dragon spam e skip reale ancora da implementare. Vedi [ADR-005](docs/ADR-005-attack-loop-v1.md). |
+| **Attacco (deploy)** | Strategia di default **DRAGON CLONE** (18 nov): card draghi selezionata una volta, tutti i draghi tappati **nello stesso punto** di erba libera, subito dopo i **Clone Spell** sui draghi (numero deciso dalla GUI, `attack.clone_spells`) e infine gli **eroi dietro ai draghi**. Una sola passata veloce: niente sweep a griglia/due passate. `attack.strategy=dragon_spam` resta selezionabile (vecchia strategia). Vedi anche `attack.clone_card_slot` e `attack.deploy_interval_s`. |
+| **AUTO (farm + upgrade)** | **Loop unico** (`auto-run`, pannello GUI *Auto*): farm Dragon Clone finché oro/elisir/dark non sono pieni → poi upgrade per priorità (`upgrade.priority`) con i tetti di spesa → ripete. **Stop reale** quando *tutti i builder sono occupati* e *i depositi sono pieni*; con `auto.require_lab_and_pets=true` lo stop richiede anche laboratorio e casa dei famigli al lavoro (rilevamento live non ancora implementato: con true il loop **attende** invece di fermarsi, mai stop non verificato). Farm e upgrade non girano mai in parallelo (un solo subprocess). |
 | **Vision/OCR** | Testo con **OCR** (`rapidocr` + `onnxruntime`, extra `ocr`); UI con euristiche cromatiche/geometriche. Geometria in frazioni del frame (windowed e fullscreen). OCR solo sul pannello Build e solo quando serve (~0,93 s/schermata; scansione completa ~85 s). I **piccoli errori OCR sui nomi noti** vengono recuperati con una canonicalizzazione fuzzy conservativa (`Craftina Station` → `Crafting Station`, usata anche da merge e navigazione live); i nomi davvero illeggibili restano **scartati** (mai indovinare). Immagini di gioco **non versionate** (dati account). |
 | **Backup git** | Remote configurato: `git@github.com:Luiss896/COC-Bot.git` (SSH, branch `main`). |
 
@@ -39,8 +41,11 @@ Repository di sviluppo del bot. Il piano completo è in [`../progetto-bot-coc/`]
 - [x] **POC WGC ≥10 FPS**: 47,4 FPS sulla finestra anche coperta, 0 frame neri (vedi ADR-002)
 - [x] **POC input non invasivo**: click via messaggi Win32 senza focus/cursore; apre e chiude pannelli
 - [x] **Moduli produzione**: `WgcScreenSource` (crop area client) + `WinMsgSink` (coordinate canoniche), CLI aggiornata, test
-- [x] **GUI ridisegnata (18 nov 2026, tkinter)**: pannelli **Panoramica** (stato gioco/bot/cattura, risorse HUD, attività in corso), **Battaglia** (simulazione gratis, scout loot, raid reale, farm: parametri con costo massimo stimato e conferma), **Upgrade** (analisi sola lettura, tetti di spesa, target/piano con conferma), **Registro** (filtri + esporta) e **Sicurezza** (regole, FERMA TUTTO, config attiva). Le CLI girano in un sottoprocesso **annullabile** (kill switch o chiusura finestra: mai processi orfani) e usano la config del repo anche con cwd diversa. Aggiunti `gui --screenshot-dir` per l'audit visivo, il comando `hud` (sola lettura) e **66 nuovi test** (GUI headless, runner, tema/contrasto WCAG, config, HUD, regressioni engine): **240 test verdi**
+- [x] **GUI ridisegnata (18 nov 2026, tkinter)**: pannelli **Panoramica** (stato gioco/bot/cattura, risorse HUD, attività in corso), **Battaglia** (simulazione gratis, scout loot, raid reale, farm: parametri con costo massimo stimato e conferma), **Upgrade** (analisi sola lettura, tetti di spesa, target/piano con conferma), **Registro** (filtri + esporta) e **Sicurezza** (regole, FERMA TUTTO, config attiva). Le CLI girano in un sottoprocesso **annullabile** (kill switch o chiusura finestra: mai processi orfani) e usano la config del repo anche con cwd diversa. Aggiunti `gui --screenshot-dir` per l'audit visivo, il comando `hud` (sola lettura) e suite estesa (GUI headless, runner, tema/contrasto WCAG, config, HUD, regressioni engine, Dragon Clone, AUTO): **~282 test verdi**
 - [x] **Humanization/anti-ban**: ritmi variabili, pause random, tap a vuoto solo su erba vuota, rate limit, avvisi
+- [x] **DRAGON CLONE (18 nov, attacco piu' veloce)**: tutti i draghi nello stesso punto (tap ripetuti sulla card selezionata), poi Clone Spell sui draghi (numero dalla GUI), poi eroi subito dietro; una sola passata con intervallo tap configurabile. CLI `attack-run/attack-farm/auto-run` con `--strategy`, `--clones`, `--clone-card-slot`
+- [x] **AUTO farm+upgrade (18 nov)**: loop unico `auto-run` + pannello GUI *Auto*; stop reale con **builder tutti occupati + depositi pieni** (e lab/famigli se `auto.require_lab_and_pets`). Dry-run disponibile. Lab/famigli: il rilevamento live non è ancora implementato, quindi con la richiesta attiva il loop attende invece di fermarsi (nessuno stop non verificato)
+- [x] **Fix upgrade (18 nov)**: costi OCR implausibili scartati, dialoghi con costo riga≠dialogo gestiti con tetto prudente `max()` e budget (casi reali muro 1500 vs 1.500.000 e trap 2 vs 2500), esecuzione che continua sui candidati successivi, verifiche post-spesa tolleranti al reddito; il pulsante *Rileva gioco* interpreta il JSON multilinea e le CLI non sono più bufferizzate
 - [x] **Impatto misurato** (`bench`): **6,6% di un core**, ~74 MB RAM, cattura 5 FPS → non interferisce
 - [x] **Fullscreen verificato**: client 2452×1379, frame WGC 2452×1408, crop (0,29), mappatura tap corretta (match 0,967)
 - [x] **Gate pannello**: niente tap a vuoto se nella zona basso-centro è aperto un pannello info
@@ -120,6 +125,12 @@ python -m cocbot attack-run --allow-spend --ignore-caps      # forza il raid anc
 python -m cocbot attack-run --allow-spend --spells 5 --early-exit-damage 40  # early-exit al 40% di danno
 python -m cocbot attack-farm                 # dry-run del farm (nessuna spesa)
 python -m cocbot attack-farm --allow-spend --cycles 2 --max-gold-spend 2200  # farm reale con tetto
+python -m cocbot attack-run --allow-spend --strategy dragon_clone --clones 2  # Dragon Clone
+
+# 12) AUTO: farm fino a depositi pieni -> upgrade per priorità -> stop
+python -m cocbot auto-run                    # dry-run (HUD + decisione + simulazione)
+python -m cocbot auto-run --allow-spend --cycles 20 --max-upgrades 3   # loop reale con tetti
+python -m cocbot auto-run --allow-spend --require-lab-pets             # stop solo con lab+famigli al lavoro
 ```
 
 > `probe` è **solo lettura**. `capture`/`input-test` non rubano focus né muovono il cursore.
@@ -135,8 +146,12 @@ Cinque pannelli, tutti in italiano e con spiegazioni in linea:
 - **Battaglia**: parametri (ricerche max, spell, draghi, early-exit, eroi, cap storage) con
   **costo massimo stimato** sempre visibile; azioni **Simulazione (gratis)**, **Scout loot**,
   **Raid reale**, **Farm**; le tre che spendono chiedono conferma con il costo stimato.
+- **Battaglia**: strategia **Dragon Clone** di default: tutti i draghi nello stesso punto, poi
+  **Cloni** (numero configurabile), poi eroi; costo massimo stimato e conferma sempre visibili.
 - **Upgrade**: analisi in sola lettura, tetti di spesa (`max oro/elisir/dark/upgrade`), esecuzione
   target (`--only`) o piano completo, sempre con conferma esplicita.
+- **Auto**: loop unico farm+upgrade; si ferma con **builder occupati + depositi pieni** (e
+  lab/famigli al lavoro se richiesto). Dry-run gratuito disponibile.
 - **Registro**: log colorato filtrabile (testo + livello), auto-scroll, esportazione su file.
 - **Sicurezza**: regole non negoziabili, **FERMA TUTTO** (bot + task CLI), configurazione attiva
   e avvertenza ToS.
@@ -158,9 +173,12 @@ config/config.example.yaml   configurazione (backend, sicurezza, attacco, upgrad
 src/cocbot/
   __main__.py                CLI: probe | capture | input-test | gui | bench | config-check | adb-check
                              | hud | upgrade-scan | upgrade-run | attack-scan | attack-scout
+                             | attack-run | attack-farm | auto-run
   app/controller.py          ciclo start/stop, cattura, pause, tap a vuoto umanizzati
   app/upgrade_engine.py      engine upgrade: HUD, scansione menu Build, planner, esecuzione verificata
-  app/attack_engine.py       loop attacco: menu Battle, My Army, anteprima base (loot OCR) + policy
+  app/attack_engine.py       loop attacco: menu Battle, My Army, anteprima base (loot OCR) + policy,
+                             deploy Dragon Clone (draghi stesso punto, cloni, eroi)
+  app/auto_engine.py         loop AUTO: farm fino a depositi pieni -> upgrade -> stop (builder+depositi)
   core/                      tipi e contratti (ScreenSource, InputSink, Device)
   config/                    modelli pydantic + loader
   safety/humanize.py         humanization/anti-ban: ritmi, pause, rate limit, avvisi

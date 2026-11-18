@@ -286,6 +286,10 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         f"switch_all_when_walls_max={config.walls.switch_to_all_builders_when_walls_max}"
     )
     print(
+        f"  auto: enabled={config.auto.enabled}  storage_full_ratio={config.auto.storage_full_ratio}  "
+        f"require_lab_and_pets={config.auto.require_lab_and_pets}  max_cycles={config.auto.max_cycles}"
+    )
+    print(
         f"  attack: strategy={config.attack.strategy}  clones={config.attack.clone_spells}  "
         f"clone_card_slot={config.attack.clone_card_slot}  deploy_interval_s={config.attack.deploy_interval_s}  "
         f"preset={config.upgrade.preset}"
@@ -753,6 +757,98 @@ def cmd_hud(args: argparse.Namespace) -> int:
         engine.close()
 
 
+def cmd_auto_run(args: argparse.Namespace) -> int:
+    """Loop AUTO unico: farm fino a depositi pieni, poi upgrade per priorità, poi stop.
+
+    Condizioni di stop reali: **tutti i builder occupati + depositi pieni** (e, con
+    ``--require-lab-pets``, anche laboratorio e famigli al lavoro). Senza ``--allow-spend``
+    è un dry-run: legge HUD, decide e simula un raid senza spendere.
+    """
+    from cocbot.app.attack_engine import AttackEngine
+    from cocbot.app.auto_engine import AutoEngine
+    from cocbot.app.upgrade_engine import UpgradeEngineError
+    from cocbot.vision.ocr import OcrUnavailable
+
+    config, upgrade_engine = _load_engine(args.config)
+    attack_engine = AttackEngine(upgrade_engine.window, config, log=print)
+    budgets = {
+        currency: value
+        for currency, value in (
+            ("gold", args.max_gold),
+            ("elixir", args.max_elixir),
+            ("dark", args.max_dark),
+        )
+        if value is not None
+    }
+    auto = AutoEngine(upgrade_engine, attack_engine, config, log=print)
+    try:
+        report = auto.run(
+            allow_spend=args.allow_spend,
+            cycles=args.cycles if args.cycles is not None else config.auto.max_cycles,
+            farm_max_searches=max(1, args.max_searches),
+            dragons=max(1, args.dragons),
+            heroes=not args.no_heroes,
+            spells=max(0, args.spells),
+            clones=args.clones,
+            strategy=args.strategy,
+            clone_card_slot=args.clone_card_slot,
+            early_exit_damage=max(0, args.early_exit_damage),
+            upgrade_budgets=budgets or None,
+            max_upgrades=args.max_upgrades,
+            require_lab_and_pets=True if args.require_lab_pets else None,
+            sleep_between_s=(
+                args.sleep_between_s
+                if args.sleep_between_s is not None
+                else config.auto.sleep_between_s
+            ),
+            wait_between_s=(
+                args.wait_between_s if args.wait_between_s is not None else config.auto.wait_between_s
+            ),
+        )
+        print("\n== AUTO RUN ==")
+        print(
+            f"  dry_run={report['dry_run']} cicli={report['cycles_done']}/"
+            f"{report['cycles_requested']}"
+        )
+        print(f"  stop: {report['stop_reason']}")
+        print(f"  farm: raid={report['farm']['attacks']} ricerche={report['farm']['searches']}")
+        print(
+            f"  upgrade: piani={report['upgrade']['plans']} "
+            f"eseguiti={report['upgrade']['executed']}"
+        )
+        for action in report["actions"]:
+            kind = action["action"]
+            if kind == "farm":
+                farm = action["farm"]
+                print(
+                    f"  ciclo {action['cycle']}: farm → esito={farm['outcome']} "
+                    f"danno={farm['damage_pct']}% bottino="
+                    f"{farm['loot_gold']}/{farm['loot_elixir']}/{farm['loot_dark']}"
+                )
+            elif kind == "upgrade":
+                print(
+                    f"  ciclo {action['cycle']}: upgrade → {action['executed']} eseguiti "
+                    f"({action['reason']})"
+                )
+            elif kind == "wait":
+                print(f"  ciclo {action['cycle']}: attesa ({action['reason']})")
+        if report.get("final_hud"):
+            print(f"  HUD finale: {report['final_hud']}")
+        if report.get("report_path"):
+            print(f"  report: {report['report_path']}")
+        return 0
+    except UpgradeEngineError as exc:
+        print(f"ERRORE engine: {exc}")
+        return 1
+    except OcrUnavailable as exc:
+        print(f"ERRORE OCR: {exc}")
+        print("Installa l'extra OCR: python -m pip install -e .[ocr]")
+        return 1
+    finally:
+        attack_engine.close()
+        upgrade_engine.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cocbot",
@@ -968,6 +1064,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="tetto di spesa stimata in oro per l'intero farm (1100 per ricerca/Next)",
     )
     attack_farm.set_defaults(func=cmd_attack_farm)
+
+    auto_run = sub.add_parser(
+        "auto-run",
+        help=(
+            "loop unico: farm fino a depositi pieni, poi upgrade per priorità, stop con "
+            "builder occupati + depositi pieni"
+        ),
+    )
+    auto_run.add_argument("--config", default="config/config.example.yaml")
+    auto_run.add_argument(
+        "--allow-spend",
+        action="store_true",
+        help="esegue davvero raid e upgrade (default: dry-run di sola simulazione)",
+    )
+    auto_run.add_argument("--cycles", type=int, default=None, help="numero massimo di azioni")
+    auto_run.add_argument("--max-searches", type=int, default=1, help="ricerche max per raid di farm")
+    auto_run.add_argument("--dragons", type=int, default=13)
+    auto_run.add_argument("--no-heroes", action="store_true")
+    auto_run.add_argument("--spells", type=int, default=0)
+    auto_run.add_argument("--clones", type=int, default=None)
+    auto_run.add_argument("--strategy", choices=["dragon_clone", "dragon_spam"], default=None)
+    auto_run.add_argument("--clone-card-slot", type=int, default=None)
+    auto_run.add_argument("--early-exit-damage", type=int, default=0)
+    auto_run.add_argument("--max-gold", type=int, default=None, help="tetto upgrade: oro per ciclo")
+    auto_run.add_argument("--max-elixir", type=int, default=None, help="tetto upgrade: elisir per ciclo")
+    auto_run.add_argument("--max-dark", type=int, default=None, help="tetto upgrade: dark per ciclo")
+    auto_run.add_argument("--max-upgrades", type=int, default=None, help="tetto upgrade: numero massimo")
+    auto_run.add_argument(
+        "--require-lab-pets",
+        action="store_true",
+        help="stop solo se laboratorio e famigli risultano al lavoro (sperimentale)",
+    )
+    auto_run.add_argument("--sleep-between-s", type=float, default=None)
+    auto_run.add_argument("--wait-between-s", type=float, default=None)
+    auto_run.set_defaults(func=cmd_auto_run)
 
     hud = sub.add_parser(
         "hud",

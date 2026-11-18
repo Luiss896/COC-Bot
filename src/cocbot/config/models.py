@@ -240,6 +240,21 @@ class HumanizeConfig(BaseModel):
         return value
 
 
+class AutoConfig(BaseModel):
+    """Loop AUTO unico: farm fino a depositi pieni, poi upgrade per priorità, poi stop."""
+
+    enabled: bool = True
+    # "depositi pieni" = oro/elisir/dark >= cap * ratio (1.0 = cap esatto)
+    storage_full_ratio: float = Field(default=1.0, ge=0.5, le=1.0)
+    # stop solo se anche laboratorio e casa dei famigli sono al lavoro. Sperimentale:
+    # richiede rilevamento live; finché non disponibile il loop attende, non si ferma.
+    require_lab_and_pets: bool = False
+    max_cycles: int = Field(default=20, ge=1, le=100)
+    farm_max_searches: int = Field(default=1, ge=1, le=5)
+    sleep_between_s: float = Field(default=2.0, ge=0.0, le=60.0)
+    wait_between_s: float = Field(default=120.0, ge=5.0)
+
+
 class Config(BaseModel):
     schema_version: int = 1
     profile_name: str = "default"
@@ -253,6 +268,7 @@ class Config(BaseModel):
     loot: LootConfig = Field(default_factory=LootConfig)
     upgrade: UpgradeConfig = Field(default_factory=UpgradeConfig)
     walls: WallsConfig = Field(default_factory=WallsConfig)
+    auto: AutoConfig = Field(default_factory=AutoConfig)
     scheduler: dict[str, Any] = Field(default_factory=dict)
     humanize: HumanizeConfig = Field(default_factory=HumanizeConfig)
     telemetry: dict[str, Any] = Field(default_factory=dict)
@@ -261,6 +277,7 @@ class Config(BaseModel):
 
 __all__ = [
     "AttackConfig",
+    "AutoConfig",
     "CaptureConfig",
     "Config",
     "DeviceConfig",

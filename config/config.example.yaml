@@ -150,6 +150,19 @@ walls:
   # decisione e condizioni per introdurli in docs/ADR-006-bulk-walls-decisione.md.
   # Si aggiornano al massimo `max_wall_batches_per_cycle` muri per ciclo, uno alla volta.
 
+auto:
+  # Loop AUTO unico: farm fino a depositi pieni -> upgrade per priorità -> stop.
+  enabled: true
+  # "depositi pieni" = oro/elisir/dark >= cap * ratio (1.0 = cap esatto)
+  storage_full_ratio: 1.0
+  # stop solo se anche laboratorio e casa dei famigli sono al lavoro (sperimentale:
+  # il rilevamento live non è ancora implementato; con true il loop attende)
+  require_lab_and_pets: false
+  max_cycles: 20
+  farm_max_searches: 1
+  sleep_between_s: 2.0
+  wait_between_s: 120.0
+
 scheduler:
   farm_phase_minutes: 45
   upgrade_phase_minutes: 10

@@ -261,6 +261,42 @@ def test_scout_and_farm_require_confirmation(gui: GuiHarness) -> None:
     assert arguments[index + 1] == "4400"
 
 
+def test_auto_page_and_dry_run(gui: GuiHarness) -> None:
+    assert "auto" in gui.app.pages
+    assert "auto_dry" in gui.app.buttons
+    assert "auto_run" in gui.app.buttons
+    gui.app.buttons["auto_dry"].invoke()
+    arguments, label = gui.runner.starts[0]
+    assert arguments[0] == "auto-run"
+    assert "--allow-spend" not in arguments
+    assert "--cycles" in arguments
+    assert label == "Simulazione AUTO"
+
+
+def test_auto_run_requires_confirmation(gui: GuiHarness) -> None:
+    gui.confirm.answer = False
+    gui.app.buttons["auto_run"].invoke()
+    assert gui.runner.starts == []
+    assert gui.confirm.calls[-1][0] == "AUTO farm + upgrade"
+
+    gui.confirm.answer = True
+    gui.app.buttons["auto_run"].invoke()
+    arguments, label = gui.runner.starts[0]
+    assert arguments[0] == "auto-run"
+    assert "--allow-spend" in arguments
+    assert arguments[arguments.index("--cycles") + 1] == "20"
+    assert arguments[arguments.index("--strategy") + 1] == "dragon_clone"
+    assert arguments[-2:] == CONFIG_ARG
+    assert label == "AUTO farm + upgrade"
+
+
+def test_auto_require_lab_pets_flag(gui: GuiHarness) -> None:
+    gui.app.auto_vars["require_lab_pets"].set("1")
+    gui.app.buttons["auto_dry"].invoke()
+    arguments, _label = gui.runner.starts[0]
+    assert "--require-lab-pets" in arguments
+
+
 def test_gui_clones_and_strategy_reach_cli(gui: GuiHarness) -> None:
     gui.app.attack_vars["clones"].set("4")
     gui.app.attack_vars["strategy"].set("dragon_spam")
@@ -531,4 +567,4 @@ def test_selftest_cli_runs_hidden() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "selftest GUI" in result.stdout
-    assert "pagine=5" in result.stdout
+    assert "pagine=6" in result.stdout
