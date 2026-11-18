@@ -137,17 +137,26 @@ python -m cocbot auto-run --allow-spend --require-lab-pets             # stop so
 > PNG e log restano in `out/` (ignorata da git). Nota: `windows-capture` richiede un processo a
 > integrità media (avvia il bot normalmente, non dentro sandbox/AppContainer).
 
+## Avvio senza CLI (doppio click)
+
+La GUI si avvia **senza terminale** in tre modi:
+
+- **scorciatoia «Avvia cocbot» sul Desktop** (creata automaticamente): doppio click;
+- `D:\cocbot\Avvia Cocbot.vbs` — stesso comando, finestra console nascosta;
+- `D:\cocbot\Avvia Cocbot (debug).bat` — per il troubleshooting: mostra la console con gli errori (chiude con PAUSE).
+
+Non serve `cd` né digitare comandi. Se la finestra non compare, controlla `D:\cocbot\out\gui-launcher.log`.
+
 ## GUI (ridisegnata il 18 novembre 2026)
 
-Cinque pannelli, tutti in italiano e con spiegazioni in linea:
+Sei pannelli, tutti in italiano e con spiegazioni in linea:
 
 - **Panoramica**: stato di gioco/bot/cattura, risorse HUD (`Leggi HUD` è sola lettura), attività
   in corso con *Annulla*, avvio rapido (`Rileva gioco`, `Leggi HUD`, `Avvia/Ferma bot`).
-- **Battaglia**: parametri (ricerche max, spell, draghi, early-exit, eroi, cap storage) con
-  **costo massimo stimato** sempre visibile; azioni **Simulazione (gratis)**, **Scout loot**,
-  **Raid reale**, **Farm**; le tre che spendono chiedono conferma con il costo stimato.
-- **Battaglia**: strategia **Dragon Clone** di default: tutti i draghi nello stesso punto, poi
-  **Cloni** (numero configurabile), poi eroi; costo massimo stimato e conferma sempre visibili.
+- **Battaglia**: strategia **Dragon Clone** di default (tutti i draghi nello stesso punto, poi
+  **Cloni** configurabili, poi eroi); parametri ricerche/spell/draghi/early-exit/eroi/cap storage
+  con **costo massimo stimato**; azioni **Simulazione (gratis)**, **Scout loot**, **Raid reale**,
+  **Farm**, con conferma per le tre che spendono.
 - **Upgrade**: analisi in sola lettura, tetti di spesa (`max oro/elisir/dark/upgrade`), esecuzione
   target (`--only`) o piano completo, sempre con conferma esplicita.
 - **Auto**: loop unico farm+upgrade; si ferma con **builder occupati + depositi pieni** (e
