@@ -1,20 +1,21 @@
-"""Engine del loop attacco (auto-battaglia): menu Battle, anteprima esercito e anteprima base.
+"""Engine del loop attacco (auto-battaglia): menu Battle, anteprima esercito, anteprima base.
 
-Stato attuale (validato live 4 nov 2026):
+Flusso (validato live 4 nov 2026, strategia aggiornata il 23 nov 2026):
 1. apre il menu Battle dalla home e localizza "Find a Match" (geometria, senza OCR);
 2. "Find a Match" -> pannello **My Army** (`ARMY_REVIEW`): X rossa per chiudere, pulsante verde
    "Attack!" che avvia la **ricerca base a pagamento** (~1100 oro);
 3. "Attack!" -> **anteprima base** (`PREVIEW`): bottino disponibile (oro/elisir/dark), pulsante
-   "Next" (salta base, ~1100 oro) e "End Battle" (torna in home senza deployare);
-4. `evaluate_loot` (pura) decide se la base merita l'attacco; `SkipSession` limita skip/timeout.
-
-**Non deploya e non attacca**: il deploy (dragon spam) e la gestione esiti verranno aggiunti dopo
-la validazione dei frame di battaglia. Le azioni che spendono oro (Attack!, Next) sono esplicite
-e non automatiche.
+   "Next" (salta base, ~1100 oro), "End Battle" e countdown "Battle starts in: Ns";
+4. `evaluate_loot` (pura) decide se la base merita l'attacco; `SkipSession` limita skip/timeout;
+5. deploy: strategia default **DRAGON CORNER** (un angolo della mappa a caso, tutti i draghi nello
+   stesso punto di erba libera, poi Invisibility Spell, poi eroi) che parte **subito
+   nell'anteprima** senza aspettare i ~30 s del countdown; `dragon_clone`/`dragon_spam` restano
+   selezionabili. Le azioni che spendono oro (Attack!, Next) sono esplicite e non automatiche.
 """
 from __future__ import annotations
 
 import json
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,18 @@ DEFAULT_WEIGHTS: dict[str, float] = {"gold": 1.0, "elixir": 1.0, "dark": 100.0}
 
 # costo indicativo di una ricerca base o di uno skip ("Next"), usato per i tetti di spesa
 SEARCH_COST_GOLD = 1_100
+
+# strategie di deploy riconosciute (config ``attack.strategy`` / CLI ``--strategy``)
+ATTACK_STRATEGIES: tuple[str, ...] = ("dragon_corner", "dragon_clone", "dragon_spam")
+
+# Trascinamento della camera per esporre la fascia esterna verso l'angolo scelto: il drag
+# sposta il contenuto della mappa, quindi per guardare a NW bisogna trascinare verso SE.
+CORNER_PAN_DELTAS: dict[str, tuple[float, float]] = {
+    "nw": (-0.18, -0.18),
+    "ne": (0.18, -0.18),
+    "sw": (-0.18, 0.18),
+    "se": (0.18, 0.18),
+}
 
 # azioni di un ciclo di attacco dopo le quali il farm si ferma (invece di continuare)
 FARM_STOP_ACTIONS: dict[str, str] = {
@@ -307,8 +320,44 @@ class SkipSession:
         return self.can_continue(now)
 
 
+@dataclass(frozen=True, slots=True)
+class CornerDeploy:
+    """Esito di un deploy DRAGON CORNER (nessun effetto collaterale oltre ai tap)."""
+
+    taps: int
+    point: tuple[int, int] | None
+    on_grass: bool
+    corner: str
+
+
+def pick_deploy_corner(
+    rng: random.Random | None = None, *, corner: str | None = None
+) -> str:
+    """Sceglie l'angolo di deploy: quello forzato oppure uno **a caso** fra i 4.
+
+    ``corner`` puo' essere ``None``/``"random"`` (scelta casuale a ogni raid) oppure uno di
+    ``ui.CORNER_NAMES``. La scelta casuale e' iniettabile (``rng``) per i test.
+    """
+    if corner in ui.CORNER_NAMES:
+        return str(corner)
+    generator = rng or random.Random()
+    return generator.choice(ui.CORNER_NAMES)
+
+
 class AttackEngine(UpgradeEngine):
     """Engine del loop attacco: menu Battle, anteprima esercito, anteprima base e skip."""
+
+    def __init__(
+        self,
+        window,
+        config,
+        *,
+        rng: random.Random | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(window, config, **kwargs)
+        # generatore per la scelta casuale dell'angolo di deploy (iniettabile nei test)
+        self._rng = rng or random.Random()
 
     # ------------------------------------------------------------------ menu Battle
     def open_battle_menu(self) -> bool:
@@ -538,6 +587,9 @@ class AttackEngine(UpgradeEngine):
         strategy: str | None = None,
         clones: int | None = None,
         clone_card_slot: int | None = None,
+        corner: str | None = None,
+        invisibility: int | None = None,
+        invisibility_card_slot: int | None = None,
     ) -> dict:
         """Ciclo di attacco completo: ricerca (eventuali skip), deploy, esito, ritorno in home.
 
@@ -546,6 +598,9 @@ class AttackEngine(UpgradeEngine):
         numero totale di ricerche (= tetto di spesa ``max_searches * 1100`` oro circa); in piu'
         ``SkipSession`` applica i limiti di config ``loot.max_skip_per_attack`` / ``skip_timeout_s``.
         ``spells``: quante spell lanciare dopo draghi/eroi (0 = nessuna).
+        ``strategy``: ``dragon_corner`` (default), ``dragon_clone`` o ``dragon_spam``.
+        ``corner``: angolo per ``dragon_corner`` (``random``/``nw``/``ne``/``sw``/``se``).
+        ``invisibility``: Invisibility Spell per ``dragon_corner`` (default config).
         ``respect_storage_caps``: legge l'HUD prima di spendere e salta il raid se oro+elisir sono
         al cap (``attack.storage_cap_gold``/``storage_cap_elixir``); il bottino atteso viene ridotto
         alla capacita' residua per la decisione.
@@ -566,6 +621,16 @@ class AttackEngine(UpgradeEngine):
             "dark_fallback": False,
             "result": None,
             "action": None,
+            "strategy": None,
+            "corner": None,
+            "invisibility": None,
+            "deploy_phase": None,
+            "deploy_point": None,
+            "deploy_on_grass": None,
+            "deploy_started_after_s": None,
+            "preview_deploy_ignored": False,
+            "battle_started_by_deploy": False,
+            "battle_wait_s": None,
             "hud_before": None,
             "hud_after": None,
             "report_path": None,
@@ -683,37 +748,70 @@ class AttackEngine(UpgradeEngine):
                 report["searches"] += 1
                 report["skips"] += 1
                 skip_session.record_skip(time.monotonic())
-            if not self.wait_battle_start():
-                report["action"] = "battle_not_started"
-                self.end_battle()
-                return self._finish_report(report)
             chosen_strategy = strategy or self.config.attack.strategy
+            if chosen_strategy not in ATTACK_STRATEGIES:
+                self.log(
+                    f"run_attack: strategia {chosen_strategy!r} sconosciuta, uso 'dragon_corner'"
+                )
+                chosen_strategy = "dragon_corner"
             chosen_clones = int(self.config.attack.clone_spells if clones is None else clones)
+            chosen_invisibility = int(
+                self.config.attack.invisibility_spells if invisibility is None else invisibility
+            )
             report["strategy"] = chosen_strategy
             report["clones"] = chosen_clones
-            if chosen_strategy == "dragon_clone":
-                # deploy veloce: niente attesa lunga; pan solo se non c'e' erba visibile
-                battle = self.grab()
-                if not ui.find_deploy_candidates(battle, limit=1):
-                    self.pan_camera(0.22, image=battle)
-                    time.sleep(0.3)
-                    battle = self.grab()
-                time.sleep(0.5)
-                report["deploy_taps"] = self.deploy_dragon_clone(
-                    battle,
+            report["invisibility"] = chosen_invisibility
+            if chosen_strategy == "dragon_corner":
+                # deploy IMMEDIATO in anteprima: niente attesa del countdown "Battle starts in"
+                chosen_corner = pick_deploy_corner(
+                    getattr(self, "_rng", None),
+                    corner=corner if corner is not None else self.config.attack.corner,
+                )
+                report["corner"] = chosen_corner
+                self.log(
+                    f"run_attack: strategia dragon_corner · angolo {chosen_corner.upper()} · "
+                    "deploy subito in anteprima (senza aspettare il countdown)"
+                )
+                if not self.deploy_corner_phase(
+                    report=report,
+                    corner=chosen_corner,
                     dragons=dragons,
                     heroes=heroes,
-                    clones=chosen_clones,
-                    clone_card_slot=clone_card_slot,
-                )
+                    invisibility=chosen_invisibility,
+                    invisibility_card_slot=invisibility_card_slot,
+                ):
+                    self.log("run_attack: battaglia non iniziata, esco con End Battle")
+                    self.end_battle()
+                    return self._finish_report(report)
             else:
-                time.sleep(3.0)
-                battle = self.grab()
-                self.pan_camera(0.28, image=battle)
-                time.sleep(0.8)
-                report["deploy_taps"] = self.deploy_dragon_spam(
-                    self.grab(), dragons=dragons, heroes=heroes
-                )
+                # strategie storiche: l'attesa del countdown resta necessaria
+                if not self.wait_battle_start():
+                    report["action"] = "battle_not_started"
+                    self.end_battle()
+                    return self._finish_report(report)
+                if chosen_strategy == "dragon_clone":
+                    # deploy veloce: niente attesa lunga; pan solo se non c'e' erba visibile
+                    battle = self.grab()
+                    if not ui.find_deploy_candidates(battle, limit=1):
+                        self.pan_camera(0.22, image=battle)
+                        time.sleep(0.3)
+                        battle = self.grab()
+                    time.sleep(0.5)
+                    report["deploy_taps"] = self.deploy_dragon_clone(
+                        battle,
+                        dragons=dragons,
+                        heroes=heroes,
+                        clones=chosen_clones,
+                        clone_card_slot=clone_card_slot,
+                    )
+                else:
+                    time.sleep(3.0)
+                    battle = self.grab()
+                    self.pan_camera(0.28, image=battle)
+                    time.sleep(0.8)
+                    report["deploy_taps"] = self.deploy_dragon_spam(
+                        self.grab(), dragons=dragons, heroes=heroes
+                    )
             if spells > 0:
                 report["spell_taps"] = self.deploy_spells(self.grab(), count=spells)
             end_frame = None
@@ -788,6 +886,9 @@ class AttackEngine(UpgradeEngine):
         strategy: str | None = None,
         clones: int | None = None,
         clone_card_slot: int | None = None,
+        corner: str | None = None,
+        invisibility: int | None = None,
+        invisibility_card_slot: int | None = None,
     ) -> dict:
         """Ripete il ciclo attacco con **tetto di spesa** e si ferma se un ciclo non attacca.
 
@@ -816,6 +917,9 @@ class AttackEngine(UpgradeEngine):
                 strategy=strategy,
                 clones=clones,
                 clone_card_slot=clone_card_slot,
+                corner=corner,
+                invisibility=invisibility,
+                invisibility_card_slot=invisibility_card_slot,
             )
             report["reports"].append(cycle_report)
             report["stopped"] = "dry_run"
@@ -843,6 +947,9 @@ class AttackEngine(UpgradeEngine):
                 strategy=strategy,
                 clones=clones,
                 clone_card_slot=clone_card_slot,
+                corner=corner,
+                invisibility=invisibility,
+                invisibility_card_slot=invisibility_card_slot,
             )
             report["reports"].append(cycle_report)
             report["cycles_done"] += 1
@@ -952,6 +1059,219 @@ class AttackEngine(UpgradeEngine):
                 taps += 2
         self.log(f"deploy_clone: completato, tap={taps}")
         return taps
+
+    # ------------------------------------------------------------------ DRAGON CORNER
+    def pan_camera_towards_corner(self, corner: str, *, image: np.ndarray | None = None) -> None:
+        """Panna la camera verso l'angolo scelto (rivela la fascia esterna della mappa)."""
+        dx, dy = CORNER_PAN_DELTAS.get(corner, (0.0, 0.0))
+        if dx == 0.0 and dy == 0.0:
+            return
+        self.log(f"deploy_corner: panno la camera verso {corner.upper()} (dx={dx:+.2f} dy={dy:+.2f})")
+        self.pan_camera(dx, dy, image=image)
+
+    def _corner_deploy_point(
+        self, image: np.ndarray, corner: str
+    ) -> tuple[tuple[int, int] | None, bool]:
+        """Punto di deploy per l'angolo: erba nell'angolo, poi erba globale, poi griglia.
+
+        Ritorna ``(punto, on_grass)``; ``(None, False)`` se non c'e' nessun punto sicuro.
+        """
+        point = ui.find_corner_deploy_point(image, corner)
+        if point is not None:
+            return point, True
+        for candidate in ui.find_deploy_candidates(image, limit=10):
+            if ui.battle_tap_is_safe(image, candidate):
+                self.log(
+                    "deploy_corner: nessuna erba libera nell'angolo, uso l'erba piu' vicina al centro"
+                )
+                return candidate, True
+        for candidate in ui.battle_field_grid(image):
+            if ui.battle_tap_is_safe(image, candidate):
+                self.log(
+                    "deploy_corner: nessuna erba, uso un punto di griglia sicuro (rischio ispezione)"
+                )
+                return candidate, False
+        return None, False
+
+    @staticmethod
+    def _offset_towards_center(
+        image: np.ndarray, point: tuple[int, int], fraction: float
+    ) -> tuple[int, int]:
+        """Punto spostato di ``fraction`` del vettore verso il centro del villaggio."""
+        h, w = image.shape[:2]
+        center_x, center_y = int(w * 0.5), int(h * 0.45)
+        return (
+            int(round(point[0] + (center_x - point[0]) * fraction)),
+            int(round(point[1] + (center_y - point[1]) * fraction)),
+        )
+
+    def _invisibility_targets(
+        self, image: np.ndarray, point: tuple[int, int], *, count: int
+    ) -> list[tuple[int, int]]:
+        """Target delle Invisibility Spell: il punto dei draghi e quelli verso il villaggio.
+
+        Le spell vengono lanciate in fila dal punto di deploy verso il centro (dove i draghi
+        stanno andando). Ogni target e' filtrato con le zone vietate: in caso di dubbio si
+        riusa il punto dei draghi (mai un pulsante che spende).
+        """
+        targets: list[tuple[int, int]] = [point]
+        for index in range(1, max(1, count)):
+            target = self._offset_towards_center(image, point, 0.05 * index)
+            if not ui.battle_tap_is_safe(image, target):
+                target = point
+            targets.append(target)
+        return targets[: max(1, count)]
+
+    def deploy_dragon_corner(
+        self,
+        image: np.ndarray,
+        *,
+        corner: str,
+        dragons: int = 13,
+        heroes: bool = True,
+        invisibility: int = 0,
+        invisibility_card_slot: int | None = None,
+    ) -> CornerDeploy:
+        """Strategia "dragon corner": tutti i draghi in un solo punto di un angolo della mappa.
+
+        Meccanica:
+        - il punto e' il centroide di **erba libera** piu' vicino all'angolo scelto (fascia
+          esterna della mappa: il tap li' deploya sempre, niente ispezioni di edifici);
+        - la card draghi si seleziona **una sola volta** e resta selezionata: N tap sullo stesso
+          punto schierano N draghi ("in un'unica volta", intervallo ``deploy_interval_s``);
+        - poi le **Invisibility Spell** (``attack.invisibility_card_slot``, 0 = primo slot) sui
+          draghi, una card+tap per spell;
+        - infine gli **eroi** dietro ai draghi (spostati verso il centro villaggio).
+        Ritorna :class:`CornerDeploy` (tap inviati, punto scelto, se era erba).
+        """
+        height = image.shape[0]
+        point, on_grass = self._corner_deploy_point(image, corner)
+        if point is None:
+            self.log(f"deploy_corner: nessun punto di deploy per l'angolo {corner.upper()}")
+            return CornerDeploy(0, None, False, corner)
+        interval = float(self.config.attack.deploy_interval_s)
+        card = ui.battle_card_point(image, ui.BATTLE_DRAGON_CARD)
+        self.log(
+            f"deploy_corner: angolo {corner.upper()} · {max(0, dragons)} draghi tutti su {point}"
+            f" (erba={on_grass}, intervallo {interval:.2f}s)"
+        )
+        self._tap(card, wait_s=0.2)
+        taps = 1
+        for _ in range(max(0, dragons)):
+            self._tap(point, wait_s=interval)
+            taps += 1
+        invis_count = max(0, invisibility)
+        if invis_count:
+            slot = int(
+                self.config.attack.invisibility_card_slot
+                if invisibility_card_slot is None
+                else invisibility_card_slot
+            )
+            spell_card = ui.battle_card_point(image, ui.battle_spell_card(slot))
+            targets = self._invisibility_targets(image, point, count=invis_count)
+            self.log(
+                f"deploy_corner: {invis_count} invisibilita' @ card slot {slot} sui draghi in {point}"
+            )
+            for target in targets:
+                self._tap(spell_card, wait_s=0.2)
+                self._tap(target, wait_s=0.35)
+                taps += 2
+        if heroes:
+            hero_target = self._offset_towards_center(image, point, 0.04)
+            if not ui.battle_tap_is_safe(image, hero_target):
+                hero_target = (point[0], min(height - 1, point[1]))
+            for label, fraction in (
+                ("arciere", ui.BATTLE_QUEEN_CARD),
+                ("grand warden", ui.BATTLE_WARDEN_CARD),
+            ):
+                hero_card = ui.battle_card_point(image, fraction)
+                self.log(f"deploy_corner: eroe {label} @ {hero_card} -> {hero_target}")
+                self._tap(hero_card, wait_s=0.2)
+                self._tap(hero_target, wait_s=0.2)
+                taps += 2
+        self.log(f"deploy_corner: completato, tap={taps}")
+        return CornerDeploy(taps=taps, point=point, on_grass=on_grass, corner=corner)
+
+    def deploy_corner_phase(
+        self,
+        *,
+        report: dict,
+        corner: str,
+        dragons: int,
+        heroes: bool,
+        invisibility: int,
+        invisibility_card_slot: int | None,
+    ) -> bool:
+        """Deploy DRAGON CORNER **subito**, senza aspettare i ~30 s del countdown.
+
+        Sequenza:
+        1. panna la camera verso l'angolo e deploya subito mentre siamo in ``PREVIEW`` (davanti
+           al countdown "Battle starts in: ~30s"): se il gioco accetta i tap la battaglia parte
+           immediatamente e si risparmiano quei secondi; se li ignora non succede nulla di male
+           (tap solo su erba/punti filtrati, mai su Next/End Battle/Boost);
+        2. se lo stato e' ancora ``PREVIEW``, attende l'inizio della battaglia (poll ~0.2 s) e
+           **ripete il deploy**: il raid attacca in ogni caso, senza perdere truppe (se erano
+           gia' scese, le card sono vuote e i tap non hanno effetto).
+        Ritorna ``True`` se la battaglia e' iniziata, ``False`` se non e' iniziata (timeout).
+        """
+        started = time.monotonic()
+        frame = self.grab()
+        if self.config.attack.corner_pan:
+            self.pan_camera_towards_corner(corner, image=frame)
+            frame = self.grab()
+        outcome = self.deploy_dragon_corner(
+            frame,
+            corner=corner,
+            dragons=dragons,
+            heroes=heroes,
+            invisibility=invisibility,
+            invisibility_card_slot=invisibility_card_slot,
+        )
+        report["deploy_taps"] = int(outcome.taps)
+        report["deploy_point"] = outcome.point
+        report["deploy_on_grass"] = outcome.on_grass
+        report["deploy_phase"] = "preview"
+        report["deploy_started_after_s"] = round(time.monotonic() - started, 2)
+        state = states.classify(self.grab())
+        if state is ScreenState.BATTLE:
+            report["battle_started_by_deploy"] = True
+            self.log("deploy_corner: deploy accettato in anteprima: battaglia iniziata subito")
+            return True
+        if state in (ScreenState.BATTLE_END, ScreenState.HOME):
+            return True
+        if state is ScreenState.PREVIEW:
+            report["preview_deploy_ignored"] = True
+            self.log(
+                "deploy_corner: i tap in anteprima non avviano la battaglia (countdown attivo): "
+                "ripeto il deploy appena parte"
+            )
+        else:
+            self.log(
+                f"deploy_corner: stato {state.value} dopo il deploy in anteprima: attendo l'inizio"
+            )
+        wait_started = time.monotonic()
+        timeout_s = max(40.0, float(self.config.attack.max_battle_duration_s))
+        if not self.wait_battle_start(timeout_s=timeout_s):
+            report["action"] = "battle_not_started"
+            return False
+        report["battle_wait_s"] = round(time.monotonic() - wait_started, 2)
+        frame = self.grab()
+        if self.config.attack.corner_pan:
+            self.pan_camera_towards_corner(corner, image=frame)
+            frame = self.grab()
+        outcome = self.deploy_dragon_corner(
+            frame,
+            corner=corner,
+            dragons=dragons,
+            heroes=heroes,
+            invisibility=invisibility,
+            invisibility_card_slot=invisibility_card_slot,
+        )
+        report["deploy_taps"] = int(report.get("deploy_taps") or 0) + int(outcome.taps)
+        report["deploy_point"] = outcome.point
+        report["deploy_on_grass"] = outcome.on_grass
+        report["deploy_phase"] = "battle"
+        return True
 
     def deploy_spells(self, image: np.ndarray, *, count: int = 5) -> int:
         """Seleziona la card spell e lancia le spell sulle tessere di erba/centro villaggio.
@@ -1085,9 +1405,12 @@ class AttackEngine(UpgradeEngine):
 
 
 __all__ = [
+    "ATTACK_STRATEGIES",
     "AttackEngine",
     "AttackEngineError",
     "BattleMenuRead",
+    "CORNER_PAN_DELTAS",
+    "CornerDeploy",
     "DEFAULT_WEIGHTS",
     "LootDecision",
     "LootPreview",
@@ -1095,4 +1418,5 @@ __all__ = [
     "evaluate_loot",
     "evaluate_loot_from_config",
     "parse_loot_items",
+    "pick_deploy_corner",
 ]

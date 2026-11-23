@@ -239,7 +239,9 @@ def test_raid_requires_confirmation_and_uses_teto(gui: GuiHarness) -> None:
     assert arguments[2:4] == ["--max-searches", "2"]
     assert "--dragons" in arguments and "--spells" in arguments
     assert arguments[arguments.index("--clones") + 1] == "2"
-    assert arguments[arguments.index("--strategy") + 1] == "dragon_clone"
+    assert arguments[arguments.index("--strategy") + 1] == "dragon_corner"
+    assert arguments[arguments.index("--corner") + 1] == "random"
+    assert arguments[arguments.index("--invisibility") + 1] == "5"
     assert arguments[-2:] == CONFIG_ARG
     assert gui.confirm.calls[-1][0] == "Raid reale"
 
@@ -285,7 +287,9 @@ def test_auto_run_requires_confirmation(gui: GuiHarness) -> None:
     assert arguments[0] == "auto-run"
     assert "--allow-spend" in arguments
     assert arguments[arguments.index("--cycles") + 1] == "20"
-    assert arguments[arguments.index("--strategy") + 1] == "dragon_clone"
+    assert arguments[arguments.index("--strategy") + 1] == "dragon_corner"
+    assert arguments[arguments.index("--corner") + 1] == "random"
+    assert arguments[arguments.index("--invisibility") + 1] == "5"
     assert arguments[-2:] == CONFIG_ARG
     assert label == "AUTO farm + upgrade"
 
@@ -308,9 +312,11 @@ def test_gui_clones_and_strategy_reach_cli(gui: GuiHarness) -> None:
     assert "--strategy" in arguments
 
 
-def test_gui_clones_default_from_config(gui: GuiHarness) -> None:
+def test_gui_attack_defaults_from_config(gui: GuiHarness) -> None:
     assert gui.app.attack_vars["clones"].get() == "2"
-    assert gui.app.attack_vars["strategy"].get() == "dragon_clone"
+    assert gui.app.attack_vars["strategy"].get() == "dragon_corner"
+    assert gui.app.attack_vars["corner"].get() == "random"
+    assert gui.app.attack_vars["invis"].get() == "5"
 
 
 def test_upgrade_target_execution_and_budgets(gui: GuiHarness) -> None:

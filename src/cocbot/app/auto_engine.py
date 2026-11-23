@@ -2,7 +2,8 @@
 
 Un solo processo alterna le due fasi (mai due motori input in parallelo):
 
-1. **farm**: raid Dragon Clone ripetuti finché oro/elisir/dark non raggiungono il cap;
+1. **farm**: raid Dragon Corner (angolo casuale, invisibilità) ripetuti finché
+   oro/elisir/dark non raggiungono il cap;
 2. **upgrade**: scansione del menu Build + piano per priorità (`upgrade.priority`) con i
    tetti di spesa configurati, eseguito dal planner esistente;
 3. **stop**: si ferma solo quando *tutti i builder sono occupati* e *i depositi sono pieni*
@@ -219,6 +220,9 @@ class AutoEngine:
             "searches": cycle.get("searches"),
             "skips": cycle.get("skips"),
             "strategy": cycle.get("strategy"),
+            "corner": cycle.get("corner"),
+            "deploy_phase": cycle.get("deploy_phase"),
+            "battle_started_by_deploy": cycle.get("battle_started_by_deploy"),
             "outcome": result.get("outcome"),
             "damage_pct": result.get("damage_pct"),
             "loot_gold": result.get("loot_gold"),
@@ -251,6 +255,9 @@ class AutoEngine:
         clones: int | None = None,
         strategy: str | None = None,
         clone_card_slot: int | None = None,
+        corner: str | None = None,
+        invisibility: int | None = None,
+        invisibility_card_slot: int | None = None,
         early_exit_damage: int = 0,
         upgrade_budgets: dict[str, int] | None = None,
         max_upgrades: int | None = None,
@@ -299,6 +306,9 @@ class AutoEngine:
                 strategy=strategy,
                 clones=clones,
                 clone_card_slot=clone_card_slot,
+                corner=corner,
+                invisibility=invisibility,
+                invisibility_card_slot=invisibility_card_slot,
             )
             report["actions"].append(
                 {
@@ -356,6 +366,9 @@ class AutoEngine:
                     strategy=strategy,
                     clones=clones,
                     clone_card_slot=clone_card_slot,
+                    corner=corner,
+                    invisibility=invisibility,
+                    invisibility_card_slot=invisibility_card_slot,
                 )
                 summary = self._farm_summary(cycle_report)
                 report["farm"]["attacks"] += 1

@@ -73,7 +73,7 @@ def test_evaluate_loot_weights_from_config() -> None:
         "dark_min": loot.thresholds.dark_min,
         "score_min": loot.thresholds.score_min,
     }
-    decision = evaluate_loot(400_000, 400_000, 3_000, thresholds=thresholds, weights=loot.weights)
+    decision = evaluate_loot(900_000, 900_000, 3_000, thresholds=thresholds, weights=loot.weights)
     assert decision.should_attack
     assert DEFAULT_WEIGHTS["dark"] == 100.0
 
@@ -181,10 +181,19 @@ def test_evaluate_loot_from_config() -> None:
     from cocbot.config.models import Config
 
     loot = Config().loot
-    decision = evaluate_loot_from_config(loot, LootPreview(gold=400_000, elixir=400_000, dark=3_000))
+    decision = evaluate_loot_from_config(loot, LootPreview(gold=900_000, elixir=900_000, dark=3_000))
     assert decision.should_attack
     low = evaluate_loot_from_config(loot, LootPreview(gold=100_000, elixir=100_000, dark=100))
     assert not low.should_attack
+    # soglia richiesta: oro >= 800k E elisir >= 800k (basta un valore sotto e si salta)
+    edge = evaluate_loot_from_config(
+        loot, LootPreview(gold=800_000, elixir=800_000, dark=0)
+    )
+    assert edge.should_attack
+    below = evaluate_loot_from_config(
+        loot, LootPreview(gold=799_999, elixir=900_000, dark=0)
+    )
+    assert not below.should_attack
 
 
 @scout_dataset

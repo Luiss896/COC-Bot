@@ -1,5 +1,11 @@
 # ADR-005 — Loop attacco: menu Battle, anteprima esercito, anteprima base e battaglia (v7)
 
+> **Aggiornamento 23 nov 2026:** la strategia di deploy di default è ora **DRAGON CORNER**
+> (angolo della mappa a caso, tutti i draghi in un punto, invisibilità, eroi, deploy immediato
+> in anteprima senza countdown) e le soglie loot richieste sono oro/elisir ≥ 800k: vedi
+> [ADR-007](ADR-007-dragon-corner.md). Il loop e la meccanica di cattura/input descritti qui
+> restano validi; `dragon_clone`/`dragon_spam` sono ancora selezionabili.
+
 **Data:** 2026-11-04 · **Stato:** implementata e **validata live end-to-end**: menu Battle, My Army,
 anteprima con OCR loot, **skip reale ("Next")**, battaglia con **camera pan + 13 draghi + 2 eroi +
 spell**, esito (Victory), **OCR esiti**, bottino incassato e ritorno in home (gemme mai spese).

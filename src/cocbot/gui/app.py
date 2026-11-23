@@ -642,7 +642,8 @@ class CocbotApp:
                 ("1 · Ricerca", "Cerca una base (~1.100 oro) e salta quelle con poco bottino."),
                 (
                     "2 · Deploy",
-                    "Dragon Clone: tutti i draghi nello stesso punto, cloni sui draghi, eroi subito dopo.",
+                    "Dragon Corner: angolo della mappa a caso, tutti i draghi in un solo punto, "
+                    "poi invisibilità e eroi. Parte subito, senza aspettare il countdown.",
                 ),
                 ("3 · Esito", "Legge Victory/Defeat e il bottino, poi torna in home."),
             )
@@ -669,17 +670,26 @@ class CocbotApp:
             "spells": tk.StringVar(value="0"),
             "dragons": tk.StringVar(value="13"),
             "clones": tk.StringVar(value=str(self.config.attack.clone_spells)),
+            "invis": tk.StringVar(value=str(self.config.attack.invisibility_spells)),
             "early": tk.StringVar(value="0"),
             "cycles": tk.StringVar(value="2"),
             "strategy": tk.StringVar(value=self.config.attack.strategy),
+            "corner": tk.StringVar(value=self.config.attack.corner),
             "heroes": tk.StringVar(value="1"),
             "caps": tk.StringVar(value="1"),
         }
         fields = (
             ("searches", "Ricerche max", 1, 20, "Tetto di spesa: ~1.100 oro per ricerca."),
-            ("spells", "Spell", 0, 8, "Spell già in esercito da lanciare dopo il deploy."),
             ("dragons", "Draghi", 1, 20, "Numero di draghi da schierare (tutti nello stesso punto)."),
-            ("clones", "Cloni", 0, 8, "Clone Spell da lanciare subito sui draghi."),
+            (
+                "invis",
+                "Invisibilità",
+                0,
+                8,
+                "Invisibility Spell da lanciare sui draghi appena deployati (Dragon Corner).",
+            ),
+            ("spells", "Altre spell", 0, 8, "Spell extra (non invisibilità) da lanciare dopo il deploy."),
+            ("clones", "Cloni", 0, 8, "Clone Spell per la strategia storica dragon_clone."),
             ("early", "Early-exit danno %", 0, 100, "0 = disattivato; esce al raggiungimento della soglia."),
             ("cycles", "Cicli farm", 1, 5, "Solo per il farm: quanti raid ripetere."),
         )
@@ -696,20 +706,38 @@ class CocbotApp:
             self._tip(spin, tooltip)
             self.attack_vars[key].trace_add("write", lambda *_args: self._update_attack_costs())
         ttk.Label(grid, text="Strategia", style="Field.TLabel").grid(
-            row=2, column=2, sticky="w", padx=(0, 8), pady=(4, 0)
+            row=4, column=0, sticky="w", padx=(0, 8), pady=(8, 0)
         )
         strategy = ttk.Combobox(
             grid,
             textvariable=self.attack_vars["strategy"],
-            values=("dragon_clone", "dragon_spam"),
+            values=("dragon_corner", "dragon_clone", "dragon_spam"),
+            state="readonly",
+            width=16,
+        )
+        strategy.grid(row=5, column=0, sticky="w", padx=(0, 8), pady=(2, 0))
+        self._tip(
+            strategy,
+            "dragon_corner: un angolo della mappa a caso, tutti i draghi in un punto, poi "
+            "invisibilità e eroi; il deploy parte subito in anteprima (niente attesa del countdown). "
+            "dragon_clone / dragon_spam: strategie storiche.",
+        )
+        strategy.bind("<<ComboboxSelected>>", lambda *_args: self._update_attack_costs())
+        ttk.Label(grid, text="Angolo mappa", style="Field.TLabel").grid(
+            row=4, column=1, sticky="w", padx=(0, 8), pady=(8, 0)
+        )
+        corner = ttk.Combobox(
+            grid,
+            textvariable=self.attack_vars["corner"],
+            values=("random", "nw", "ne", "sw", "se"),
             state="readonly",
             width=14,
         )
-        strategy.grid(row=3, column=2, sticky="w", padx=(0, 8), pady=(2, 0))
+        corner.grid(row=5, column=1, sticky="w", padx=(0, 8), pady=(2, 0))
         self._tip(
-            strategy,
-            "dragon_clone: tutti i draghi nello stesso punto, poi cloni, poi eroi (più veloce). "
-            "dragon_spam: vecchia strategia a due passate.",
+            corner,
+            "random = angolo scelto a caso a ogni raid; nw/ne/sw/se = angolo fisso "
+            "(utile per test o raid mirati).",
         )
         checks = tk.Frame(options.body, bg=palette.card)
         checks.pack(fill="x", pady=(10, 0))
@@ -761,7 +789,9 @@ class CocbotApp:
             notes.body,
             (
                 "Ogni ricerca/Next costa ~1.100 oro: «Ricerche max» è il tetto di spesa.",
-                "Dragon Clone: draghi tutti nello stesso punto, poi cloni, poi eroi (deploy veloce).",
+                "Dragon Corner: angolo a caso, draghi tutti in un punto, invisibilità, eroi: "
+                "deploy immediato senza i ~30 s di countdown.",
+                "Si attaccano solo basi con oro ed elisir ≥ 800k (soglie in config: loot.thresholds).",
                 "Con storage piene il bot evita raid inutili (o attacca solo per il dark, se configurato).",
                 "Non chiudere il gioco durante una battaglia: usa «Annulla attività» o il kill switch.",
                 "Esiti e bottino finiscono nel Registro e nei report in out/attack/.",
@@ -810,7 +840,8 @@ class CocbotApp:
                 "key": "attack_raid",
                 "title": "Raid reale",
                 "badge": ("SPENDE", "spend"),
-                "description": "Ricerca, skip se il loot è basso, deploy di draghi/eroi/spell, esito e home.",
+                "description": "Ricerca, skip se il loot è basso, draghi in un angolo + "
+                "invisibilità + eroi, esito e home.",
                 "button": "Avvia raid reale",
                 "style": "Spend.TButton",
                 "cost_var": "raid",
@@ -1009,7 +1040,7 @@ class CocbotApp:
         steps.pack(fill="x", pady=(4, 0))
         for index, (title, text) in enumerate(
             (
-                ("1 · Farm", "Raid Dragon Clone ripetuti finché oro, elisir e dark non sono al cap."),
+                ("1 · Farm", "Raid Dragon Corner ripetuti finché oro, elisir e dark non sono al cap."),
                 ("2 · Upgrade", "Piano per priorità (mura→difese→esercito→eroi→risorse) con i tetti di spesa."),
                 ("3 · Stop", "Builder tutti occupati + depositi pieni (+ lab/famigli al lavoro, se richiesto)."),
             )
@@ -1025,7 +1056,7 @@ class CocbotApp:
         controls.pack(fill="x", pady=(0, 14))
         controls.header(
             "Parametri del loop",
-            "Draghi/spell/cloni/strategia si impostano in Battaglia; i tetti di spesa in Upgrade.",
+            "Draghi/invisibilità/angolo/strategia si impostano in Battaglia; i tetti di spesa in Upgrade.",
         )
         grid = tk.Frame(controls.body, bg=palette.card)
         grid.pack(fill="x")
@@ -1791,6 +1822,10 @@ class CocbotApp:
             str(int(options["clones"])),
             "--strategy",
             str(options["strategy"]),
+            "--corner",
+            str(options["corner"]),
+            "--invisibility",
+            str(int(options["invis"])),
             "--early-exit-damage",
             str(int(options["early"])),
         ]
@@ -1820,8 +1855,8 @@ class CocbotApp:
             "Loop AUTO (farm + upgrade).\n\n"
             f"{lab_note}\n"
             f"Cicli max: {self.auto_vars['cycles'].get()} · ricerche per raid: {options['searches']}.\n"
-            f"Deploy: {options['dragons']} draghi + {options['clones']} cloni "
-            f"(strategia {options['strategy']}).\n"
+            f"Deploy: {options['dragons']} draghi + {options['invis']} invisibilità "
+            f"(strategia {options['strategy']}, angolo {options['corner']}).\n"
             f"Tetti upgrade: {self._budget_summary()}.\n\n"
             "Questa azione SPENDE risorse reali. Continuare?"
         )
@@ -1835,9 +1870,12 @@ class CocbotApp:
     # ================================================================== azioni: battaglia
     def _attack_options(self) -> dict[str, int | bool | str]:
         clamp = formatting.clamp_int
-        strategy = self.attack_vars["strategy"].get() or "dragon_clone"
-        if strategy not in ("dragon_clone", "dragon_spam"):
-            strategy = "dragon_clone"
+        strategy = self.attack_vars["strategy"].get() or "dragon_corner"
+        if strategy not in ("dragon_corner", "dragon_clone", "dragon_spam"):
+            strategy = "dragon_corner"
+        corner = self.attack_vars["corner"].get() or "random"
+        if corner not in ("random", "nw", "ne", "sw", "se"):
+            corner = "random"
         return {
             "searches": clamp(self.attack_vars["searches"].get(), default=2, minimum=1, maximum=20),
             "spells": clamp(self.attack_vars["spells"].get(), default=0, minimum=0, maximum=8),
@@ -1848,11 +1886,18 @@ class CocbotApp:
                 minimum=0,
                 maximum=8,
             ),
+            "invis": clamp(
+                self.attack_vars["invis"].get(),
+                default=int(self.config.attack.invisibility_spells),
+                minimum=0,
+                maximum=8,
+            ),
             "early": clamp(self.attack_vars["early"].get(), default=0, minimum=0, maximum=100),
             "cycles": clamp(self.attack_vars["cycles"].get(), default=2, minimum=1, maximum=5),
             "heroes": self.attack_vars["heroes"].get() == "1",
             "caps": self.attack_vars["caps"].get() == "1",
             "strategy": strategy,
+            "corner": corner,
         }
 
     def _update_attack_costs(self) -> None:
@@ -1892,6 +1937,10 @@ class CocbotApp:
             str(options["clones"]),
             "--strategy",
             str(options["strategy"]),
+            "--corner",
+            str(options["corner"]),
+            "--invisibility",
+            str(int(options["invis"])),
             "--early-exit-damage",
             str(options["early"]),
         ]
@@ -1919,6 +1968,10 @@ class CocbotApp:
             str(options["clones"]),
             "--strategy",
             str(options["strategy"]),
+            "--corner",
+            str(options["corner"]),
+            "--invisibility",
+            str(int(options["invis"])),
             "--early-exit-damage",
             str(options["early"]),
             "--max-gold-spend",
@@ -1957,11 +2010,13 @@ class CocbotApp:
         searches = int(options["searches"])
         deploy = f"{options['dragons']} draghi"
         deploy += " + eroi" if options["heroes"] else ""
+        if int(options["invis"]):
+            deploy += f" + {options['invis']} invisibilità"
         if int(options["clones"]):
             deploy += f" + {options['clones']} cloni"
         if int(options["spells"]):
             deploy += f" + {options['spells']} spell"
-        deploy += f" (strategia {options['strategy']})"
+        deploy += f" (strategia {options['strategy']}, angolo {options['corner']})"
         early = int(options["early"])
         extra = f"Early-exit al {early}% di danno.\n" if early else ""
         if not self._confirm_spend(
@@ -1983,9 +2038,9 @@ class CocbotApp:
             "Farm automatico",
             "Questa azione spende risorse reali.\n\n"
             f"Cicli: {cycles} · ricerche per ciclo: {searches}.\n"
-            f"Deploy: {options['dragons']} draghi + {options['clones']} cloni"
+            f"Deploy: {options['dragons']} draghi + {options['invis']} invisibilità"
             + (" + eroi" if options["heroes"] else "")
-            + f" (strategia {options['strategy']}).\n"
+            + f" (strategia {options['strategy']}, angolo {options['corner']}).\n"
             f"Tetto di spesa: {total} ({cycles} × {searches} × ~1.100 oro).\n\n"
             "Il farm si ferma da solo se un ciclo non porta a un attacco (es. storage piene).\n\n"
             "Continuare?",

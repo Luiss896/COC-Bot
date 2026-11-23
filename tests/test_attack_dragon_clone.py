@@ -22,9 +22,15 @@ def _fake_engine() -> tuple[attack_engine.AttackEngine, list[tuple[tuple[int, in
     return engine, taps
 
 
-def test_dragon_clone_config_defaults() -> None:
+def test_attack_config_defaults() -> None:
+    """Default attuali (23 nov 2026): strategia DRAGON CORNER + Invisibility Spell."""
     config = Config()
-    assert config.attack.strategy == "dragon_clone"
+    assert config.attack.strategy == "dragon_corner"
+    assert config.attack.corner == "random"
+    assert config.attack.corner_pan is True
+    assert config.attack.invisibility_spells == 5
+    assert config.attack.invisibility_card_slot == 0
+    # la strategia storica dragon_clone resta selezionabile (config invariata)
     assert config.attack.clone_spells == 2
     assert config.attack.clone_card_slot == 0
     assert config.attack.deploy_interval_s == 0.15

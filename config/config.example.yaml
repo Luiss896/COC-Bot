@@ -69,16 +69,26 @@ army:
   expected_slots:
     troops: ["dragon", "balloon"]
     heroes: ["dragon_duke", "grand_warden"]
-    spells: ["rage", "freeze"]
+    spells: ["invisibility"]
   max_army_cost: { gold: 0, elixir: 900000, dark: 0 }
   verify_before_battle: true
   min_reserve_for_army: { gold: 200000, elixir: 300000, dark: 5000 }
 
 attack:
-  # dragon_clone = tutti i draghi nello stesso punto, cloni sui draghi, eroi subito
-  # dopo (piu' veloce); dragon_spam = vecchia strategia a due passate.
-  strategy: "dragon_clone"
-  clone_spells: 2                  # Clone Spell da lanciare sui draghi (GUI: campo "Cloni")
+  # Strategia default DRAGON CORNER (23 nov 2026): un angolo della mappa scelto a caso;
+  # TUTTI i draghi in un unico punto di erba libera dell'angolo, poi le Invisibility
+  # Spell sui draghi, poi gli eroi. Il deploy parte SUBITO in anteprima, senza aspettare
+  # i ~30 s del countdown "Battle starts in" (se il gioco ignora i tap in anteprima, il
+  # bot li ripete appena la battaglia inizia). Gli angoli evitano le zone piene di
+  # edifici dove i tap non deployano.
+  # dragon_clone = tutti i draghi nello stesso punto al centro, cloni, eroi;
+  # dragon_spam = vecchia strategia a due passate (griglia di tap).
+  strategy: "dragon_corner"
+  corner: "random"                 # random | nw | ne | sw | se (random = a caso a ogni raid)
+  corner_pan: true                 # panna la camera verso l'angolo scelto prima del deploy
+  invisibility_spells: 5           # Invisibility Spell sui draghi (GUI: campo "Invisibilità")
+  invisibility_card_slot: 0        # posizione card Invisibility nella barra spell (0 = primo slot)
+  clone_spells: 2                  # solo per la strategia dragon_clone (GUI: campo "Cloni")
   clone_card_slot: 0               # posizione della card Clone Spell (0 = primo slot)
   deploy_interval_s: 0.15          # intervallo tra i tap di deploy (secondi)
   # strategia esercito: usare gli eroi in battaglia? Se un eroe e' in upgrade non e'
@@ -102,11 +112,14 @@ attack:
   attack_for_dark_when_full: true
 
 loot:
+  # Si attacca SOLO una base con **oro >= 800k E elisir >= 800k** (richiesta utente 23 nov).
+  # dark_min=0: il dark elixir e' un bonus, non un requisito (non fa saltare la base).
+  # score_min = gold_min + elixir_min (somma pesata con pesi 1.0 e dark 0).
   thresholds:
-    gold_min: 350000
-    elixir_min: 350000
-    dark_min: 2000
-    score_min: 800000
+    gold_min: 800000
+    elixir_min: 800000
+    dark_min: 0
+    score_min: 1600000
   weights: { gold: 1.0, elixir: 1.0, dark: 100.0 }
   max_skip_per_attack: 40
   skip_timeout_s: 120

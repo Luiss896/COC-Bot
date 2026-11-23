@@ -118,10 +118,14 @@ class GuiConfig(BaseModel):
 
 
 class LootThresholds(BaseModel):
-    gold_min: int = Field(default=350_000, ge=0)
-    elixir_min: int = Field(default=350_000, ge=0)
-    dark_min: int = Field(default=2_000, ge=0)
-    score_min: float = Field(default=800_000.0, ge=0)
+    # Soglie richieste dall'utente (23 nov 2026): si attacca solo basi con **oro >= 800k
+    # E elisir >= 800k**. Il dark elixir e' un bonus: ``dark_min=0`` non blocca la base.
+    # ``score_min`` e' la somma pesata (oro + elisir + dark x 100): con pesi 1.0 e dark 0
+    # equivale a ``gold_min + elixir_min``.
+    gold_min: int = Field(default=800_000, ge=0)
+    elixir_min: int = Field(default=800_000, ge=0)
+    dark_min: int = Field(default=0, ge=0)
+    score_min: float = Field(default=1_600_000.0, ge=0)
 
 
 class EarlyExitConfig(BaseModel):
@@ -134,10 +138,22 @@ class EarlyExitConfig(BaseModel):
 
 
 class AttackConfig(BaseModel):
-    # strategia di deploy: "dragon_clone" = tutti i draghi nello stesso punto, cloni
-    # sui draghi e eroi subito dopo (veloce); "dragon_spam" = vecchia a due passate.
-    strategy: str = "dragon_clone"
-    # numero di Clone Spell da lanciare sui draghi (configurabile anche dalla GUI)
+    # Strategia di deploy (default 23 nov 2026):
+    #   "dragon_corner" = un angolo della mappa scelto a caso, tutti i draghi in un solo punto
+    #                     sull'erba libera di quell'angolo, poi le Invisibility Spell e gli eroi;
+    #                     il deploy parte SUBITO in anteprima, senza aspettare il countdown;
+    #   "dragon_clone"  = tutti i draghi nello stesso punto al centro, cloni, eroi;
+    #   "dragon_spam"   = vecchia strategia a due passate (griglia di tap).
+    strategy: Literal["dragon_corner", "dragon_clone", "dragon_spam"] = "dragon_corner"
+    # Angolo di deploy: "random" = scelto a caso a ogni raid; altrimenti angolo fisso.
+    corner: Literal["random", "nw", "ne", "sw", "se"] = "random"
+    # Panna la camera verso l'angolo scelto prima di cercare l'erba (fascia esterna mappa).
+    corner_pan: bool = True
+    # Invisibility Spell da lanciare sui draghi appena deployati (strategia dragon_corner).
+    invisibility_spells: int = Field(default=5, ge=0, le=8)
+    # posizione della card Invisibility Spell nella barra spell (0 = primo slot)
+    invisibility_card_slot: int = Field(default=0, ge=0, le=8)
+    # numero di Clone Spell da lanciare sui draghi (strategia dragon_clone)
     clone_spells: int = Field(default=2, ge=0, le=8)
     # posizione della card Clone Spell nella barra spell (0 = primo slot)
     clone_card_slot: int = Field(default=0, ge=0, le=8)

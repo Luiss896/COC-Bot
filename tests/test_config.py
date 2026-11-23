@@ -51,7 +51,11 @@ def test_example_config_is_valid() -> None:
     config = load_config(EXAMPLE)
     assert config.safety.never_spend_gems is True
     assert config.device.backend in {"window", "adb"}
-    assert config.attack.strategy == "dragon_clone"
+    assert config.attack.strategy == "dragon_corner"
+    assert config.attack.corner == "random"
+    assert config.attack.invisibility_spells == 5
+    assert config.loot.thresholds.gold_min == 800_000
+    assert config.loot.thresholds.elixir_min == 800_000
     assert config.capture.backend == "wgc"
     assert config.input.backend == "winmsg"
     assert config.safety.max_session_hours is None  # illimitato di default

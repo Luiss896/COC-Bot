@@ -310,6 +310,126 @@ def battle_field_grid(image: np.ndarray) -> list[tuple[int, int]]:
     return points
 
 
+# ---------------------------------------------------------------------------
+# Strategia DRAGON CORNER: deploy in uno dei 4 angoli della mappa.
+#
+# Perche' gli angoli: il villaggio nemico sta al centro dell'inquadratura e la fascia
+# esterna (bordo mappa/mare) e' l'unica zona quasi sempre libera da edifici; deployare
+# li' evita i tap che finiscono su un edificio (che aprono solo l'ispezione e NON
+# schierano la truppa). L'angolo viene scelto a caso a ogni raid.
+# ---------------------------------------------------------------------------
+CORNER_NAMES: tuple[str, ...] = ("nw", "ne", "sw", "se")
+
+# Ancore di ordinamento (frazioni del frame): NON sono punti di tap, servono solo a
+# scegliere il blob di erba piu' esterno verso l'angolo richiesto.
+BATTLE_CORNER_ANCHORS: dict[str, tuple[float, float]] = {
+    "nw": (0.02, 0.07),
+    "ne": (0.98, 0.07),
+    "sw": (0.02, 0.85),
+    "se": (0.98, 0.85),
+}
+
+# Zone in cui NON si deve tappare in anteprima/battaglia (x0, y0, x1, y1 in frazioni).
+# Un tap sbagliato qui puo' spendere oro (Next ~1100, Boost Army), aprire HUD/pannelli
+# o chiudere la battaglia: tutte le funzioni di deploy devono filtrarle.
+BATTLE_FORBIDDEN_TAP_ZONES: tuple[tuple[float, float, float, float], ...] = (
+    (0.00, 0.86, 1.00, 1.00),  # barra truppe/spell in basso
+    (0.00, 0.00, 0.20, 0.26),  # pannello "Available Loot" (alto sinistra)
+    (0.85, 0.00, 1.00, 0.14),  # HUD risorse (alto destra)
+    (0.00, 0.70, 0.46, 0.87),  # End Battle / Boost Army (basso sinistra)
+    (0.78, 0.62, 1.00, 0.87),  # Next / Overall Damage (basso destra)
+    (0.36, 0.00, 0.64, 0.10),  # timer battaglia (alto centro)
+)
+
+
+def battle_tap_is_safe(image: np.ndarray, point: tuple[int, int]) -> bool:
+    """True se un tap su ``point`` (pixel frame) non cade in una zona vietata."""
+    if not _valid(image) or point is None:
+        return False
+    h, w = image.shape[:2]
+    x, y = int(point[0]), int(point[1])
+    if not (0 < x < w and 0 < y < h):
+        return False
+    fx, fy = x / w, y / h
+    return not any(
+        x0 <= fx <= x1 and y0 <= fy <= y1
+        for x0, y0, x1, y1 in BATTLE_FORBIDDEN_TAP_ZONES
+    )
+
+
+def battle_corner_anchor(image: np.ndarray, corner: str) -> tuple[int, int]:
+    """Pixel del punto d'angolo (frazione) usato per ordinare i candidati di deploy."""
+    h, w = image.shape[:2]
+    fx, fy = BATTLE_CORNER_ANCHORS.get(corner, BATTLE_CORNER_ANCHORS["nw"])
+    return int(round(fx * w)), int(round(fy * h))
+
+
+def grass_deploy_blobs(
+    image: np.ndarray, *, min_area_fraction: float = 0.002
+) -> list[tuple[int, int, int]]:
+    """Blob di **erba libera deployabile** nel campo: lista ``(x, y, area)``.
+
+    Differenze rispetto a :func:`find_deploy_candidates`:
+    - include anche i blob piccoli tipici dei bordi della mappa (fascia esterna);
+    - scarta i centroidi che cadono nelle :data:`BATTLE_FORBIDDEN_TAP_ZONES`
+      (pulsanti/HUD: un tap li' costerebbe oro o cambierebbe schermata);
+    - non ordina per distanza dal centro: il chiamante sceglie l'angolo.
+    """
+    if not _valid(image):
+        return []
+    h, w = image.shape[:2]
+    hsv = _hsv(image)
+    mask = cv2.inRange(hsv, GRASS_LOW, GRASS_HIGH)
+    mask[: int(h * 0.06), :] = 0
+    mask[int(h * 0.86) :, :] = 0
+    count, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    min_area = max(1, int(min_area_fraction * w * h))
+    blobs: list[tuple[int, int, int]] = []
+    for index in range(1, count):
+        area = int(stats[index, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        cx, cy = int(centroids[index][0]), int(centroids[index][1])
+        if not battle_tap_is_safe(image, (cx, cy)):
+            continue
+        blobs.append((cx, cy, area))
+    blobs.sort(key=lambda item: item[2], reverse=True)
+    return blobs
+
+
+def find_corner_deploy_point(image: np.ndarray, corner: str) -> tuple[int, int] | None:
+    """Punto di deploy (centroide di erba libera) il piu' vicino all'angolo ``corner``.
+
+    Ordine di scelta:
+    1. blob di erba nella **meta' del frame** dell'angolo scelto (es. ``nw`` = sinistra+alto),
+       il piu' vicino all'angolo: e' la fascia esterna della mappa, lontana dagli edifici;
+    2. se in quella meta' non c'e' erba visibile, il blob piu' vicino all'angolo fra tutti
+       (il chiamante puo' pannare la camera e riprovare);
+    3. ``None`` se non c'e' erba deployabile (il chiamante usa i fallback).
+    """
+    if not _valid(image) or corner not in CORNER_NAMES:
+        return None
+    h, w = image.shape[:2]
+    blobs = grass_deploy_blobs(image)
+    if not blobs:
+        return None
+    anchor = battle_corner_anchor(image, corner)
+    center_x, center_y = w * 0.5, h * 0.45
+    sign_x = -1 if corner in ("nw", "sw") else 1
+    sign_y = -1 if corner in ("nw", "ne") else 1
+
+    def in_quadrant(blob: tuple[int, int, int]) -> bool:
+        return (blob[0] - center_x) * sign_x >= 0 and (blob[1] - center_y) * sign_y >= 0
+
+    quadrant = [blob for blob in blobs if in_quadrant(blob)]
+    pool = quadrant or blobs
+    best = min(
+        pool,
+        key=lambda blob: (blob[0] - anchor[0]) ** 2 + (blob[1] - anchor[1]) ** 2,
+    )
+    return best[0], best[1]
+
+
 # risultati battaglia: pulsante verde "Return Home" in basso al centro (misura live
 # 4 nov 1733x975: rect (756,795,224,56) -> centro (0,501 W, 0,844 H), aspetto 4,0)
 BATTLE_END_RETURN_REGION = (0.36, 0.79, 0.28, 0.12)
@@ -700,19 +820,26 @@ def center(rect: Rect) -> tuple[int, int]:
 
 
 __all__ = [
+    "BATTLE_CORNER_ANCHORS",
+    "BATTLE_FORBIDDEN_TAP_ZONES",
     "BUILDERS_REGION",
+    "CORNER_NAMES",
     "RESOURCES_REGION",
+    "battle_corner_anchor",
+    "battle_tap_is_safe",
     "builders_region",
     "center",
     "find_battle_button",
     "find_build_button",
     "find_build_panel",
     "find_confirm_button",
+    "find_corner_deploy_point",
     "find_dialog_close",
     "find_hammer_button",
     "find_inactivity_modal",
     "find_menu_close",
     "find_placement_exit",
     "find_row_bands",
+    "grass_deploy_blobs",
     "resources_region",
 ]

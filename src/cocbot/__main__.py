@@ -290,9 +290,16 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         f"require_lab_and_pets={config.auto.require_lab_and_pets}  max_cycles={config.auto.max_cycles}"
     )
     print(
-        f"  attack: strategy={config.attack.strategy}  clones={config.attack.clone_spells}  "
-        f"clone_card_slot={config.attack.clone_card_slot}  deploy_interval_s={config.attack.deploy_interval_s}  "
-        f"preset={config.upgrade.preset}"
+        f"  attack: strategy={config.attack.strategy}  corner={config.attack.corner}  "
+        f"corner_pan={config.attack.corner_pan}  invisibility={config.attack.invisibility_spells}  "
+        f"invisibility_card_slot={config.attack.invisibility_card_slot}  "
+        f"clones={config.attack.clone_spells}  deploy_interval_s={config.attack.deploy_interval_s}"
+    )
+    print(
+        f"  loot: oro_min={config.loot.thresholds.gold_min}  "
+        f"elisir_min={config.loot.thresholds.elixir_min}  "
+        f"dark_min={config.loot.thresholds.dark_min}  "
+        f"score_min={config.loot.thresholds.score_min:.0f}  preset={config.upgrade.preset}"
     )
     print(
         f"  upgrade: enabled={config.upgrade.enabled}  dry_run={config.upgrade.dry_run}  "
@@ -590,6 +597,9 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             strategy=args.strategy,
             clones=args.clones,
             clone_card_slot=args.clone_card_slot,
+            corner=args.corner,
+            invisibility=args.invisibility,
+            invisibility_card_slot=args.invisibility_card_slot,
         )
         print("\n== ATTACK RUN ==")
         print(f"  dry_run={report['dry_run']} azione={report['action']}")
@@ -614,6 +624,25 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             )
         if report.get("decision"):
             print(f"  decisione: {report['decision']}")
+        if report.get("strategy"):
+            corner = f" · angolo={report['corner']}" if report.get("corner") else ""
+            phase = report.get("deploy_phase")
+            phase_txt = {
+                "preview": "subito (anteprima, senza countdown)",
+                "battle": "all'inizio della battaglia (countdown non superabile)",
+            }.get(phase or "", phase or "—")
+            print(f"  strategia: {report['strategy']}{corner} · deploy {phase_txt}")
+            if report.get("battle_started_by_deploy"):
+                print("  battaglia avviata dal deploy in anteprima (countdown saltato)")
+            if report.get("preview_deploy_ignored"):
+                print("  nota: tap in anteprima ignorati dal gioco → deploy all'inizio battaglia")
+            if report.get("deploy_point"):
+                print(
+                    f"  punto deploy: {report['deploy_point']} "
+                    f"(erba={report.get('deploy_on_grass')})"
+                )
+            if report.get("deploy_started_after_s") is not None:
+                print(f"  primo deploy dopo {report['deploy_started_after_s']} s dalla decisione")
         if report.get("deploy_taps") is not None:
             print(f"  tap deploy: {report['deploy_taps']}")
         if report.get("spell_taps") is not None:
@@ -669,6 +698,9 @@ def cmd_attack_farm(args: argparse.Namespace) -> int:
             strategy=args.strategy,
             clones=args.clones,
             clone_card_slot=args.clone_card_slot,
+            corner=args.corner,
+            invisibility=args.invisibility,
+            invisibility_card_slot=args.invisibility_card_slot,
         )
         print("\n== ATTACK FARM ==")
         print(
@@ -792,6 +824,9 @@ def cmd_auto_run(args: argparse.Namespace) -> int:
             clones=args.clones,
             strategy=args.strategy,
             clone_card_slot=args.clone_card_slot,
+            corner=args.corner,
+            invisibility=args.invisibility,
+            invisibility_card_slot=args.invisibility_card_slot,
             early_exit_damage=max(0, args.early_exit_damage),
             upgrade_budgets=budgets or None,
             max_upgrades=args.max_upgrades,
@@ -999,9 +1034,27 @@ def build_parser() -> argparse.ArgumentParser:
     attack_run.add_argument("--spells", type=int, default=0, help="spell da lanciare dopo il deploy")
     attack_run.add_argument(
         "--strategy",
-        choices=["dragon_clone", "dragon_spam"],
+        choices=["dragon_corner", "dragon_clone", "dragon_spam"],
         default=None,
         help="strategia di deploy (default: attack.strategy in config)",
+    )
+    attack_run.add_argument(
+        "--corner",
+        choices=["random", "nw", "ne", "sw", "se"],
+        default=None,
+        help="angolo di deploy per dragon_corner (default: attack.corner in config)",
+    )
+    attack_run.add_argument(
+        "--invisibility",
+        type=int,
+        default=None,
+        help="Invisibility Spell sui draghi (default: attack.invisibility_spells)",
+    )
+    attack_run.add_argument(
+        "--invisibility-card-slot",
+        type=int,
+        default=None,
+        help="posizione della card Invisibility Spell (0 = primo slot, default config)",
     )
     attack_run.add_argument(
         "--clones",
@@ -1045,12 +1098,30 @@ def build_parser() -> argparse.ArgumentParser:
     attack_farm.add_argument("--spells", type=int, default=5)
     attack_farm.add_argument(
         "--strategy",
-        choices=["dragon_clone", "dragon_spam"],
+        choices=["dragon_corner", "dragon_clone", "dragon_spam"],
         default=None,
         help="strategia di deploy (default: attack.strategy in config)",
     )
     attack_farm.add_argument("--clones", type=int, default=None, help="Clone Spell sui draghi (default config)")
     attack_farm.add_argument("--clone-card-slot", type=int, default=None, help="posizione card Clone Spell")
+    attack_farm.add_argument(
+        "--corner",
+        choices=["random", "nw", "ne", "sw", "se"],
+        default=None,
+        help="angolo di deploy per dragon_corner (default config)",
+    )
+    attack_farm.add_argument(
+        "--invisibility",
+        type=int,
+        default=None,
+        help="Invisibility Spell sui draghi (default: attack.invisibility_spells)",
+    )
+    attack_farm.add_argument(
+        "--invisibility-card-slot",
+        type=int,
+        default=None,
+        help="posizione della card Invisibility Spell (default config)",
+    )
     attack_farm.add_argument(
         "--early-exit-damage",
         type=int,
@@ -1084,8 +1155,15 @@ def build_parser() -> argparse.ArgumentParser:
     auto_run.add_argument("--no-heroes", action="store_true")
     auto_run.add_argument("--spells", type=int, default=0)
     auto_run.add_argument("--clones", type=int, default=None)
-    auto_run.add_argument("--strategy", choices=["dragon_clone", "dragon_spam"], default=None)
+    auto_run.add_argument(
+        "--strategy", choices=["dragon_corner", "dragon_clone", "dragon_spam"], default=None
+    )
     auto_run.add_argument("--clone-card-slot", type=int, default=None)
+    auto_run.add_argument(
+        "--corner", choices=["random", "nw", "ne", "sw", "se"], default=None
+    )
+    auto_run.add_argument("--invisibility", type=int, default=None)
+    auto_run.add_argument("--invisibility-card-slot", type=int, default=None)
     auto_run.add_argument("--early-exit-damage", type=int, default=0)
     auto_run.add_argument("--max-gold", type=int, default=None, help="tetto upgrade: oro per ciclo")
     auto_run.add_argument("--max-elixir", type=int, default=None, help="tetto upgrade: elisir per ciclo")
