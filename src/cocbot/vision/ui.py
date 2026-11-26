@@ -206,14 +206,16 @@ def find_attack_button(image: np.ndarray) -> Rect | None:
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Battaglia: barra truppe in basso ed esempi di punti di deploy sulla fascia esterna.
-# Misure live 4 nov (1733x975): card draghi (0,164 W, 0,911 H), AQ (0,237, 0,911),
-# Grand Warden (0,310, 0,911), spell (0,383, 0,911). I punti di deploy sono su erba esterna
-# (lontani da HUD, pulsanti e zona "Battle ends in").
+# Misure live 23 nov 2026 (finestra 1733x975) sul layout UI attuale, che ha il
+# **Barbarian King nella barra** (nov 2025 non c'era): da sinistra draghi, King,
+# Archer Queen, Grand Warden, spell. Rispetto alle vecchie misure del 4 nov le card
+# di eroi/spell sono quindi UNA POSIZIONE (0,073) piu' a destra.
 # ---------------------------------------------------------------------------
 BATTLE_DRAGON_CARD = (0.164, 0.911)
-BATTLE_QUEEN_CARD = (0.237, 0.911)
-BATTLE_WARDEN_CARD = (0.310, 0.911)
-BATTLE_SPELL_CARD = (0.383, 0.911)
+BATTLE_KING_CARD = (0.237, 0.911)
+BATTLE_QUEEN_CARD = (0.310, 0.911)
+BATTLE_WARDEN_CARD = (0.383, 0.911)
+BATTLE_SPELL_CARD = (0.446, 0.911)
 # le card della barra sono equidistanti (verificato sulle card note: 0.073 di passo)
 BATTLE_CARD_STEP = 0.073
 
@@ -320,14 +322,31 @@ def battle_field_grid(image: np.ndarray) -> list[tuple[int, int]]:
 # ---------------------------------------------------------------------------
 CORNER_NAMES: tuple[str, ...] = ("nw", "ne", "sw", "se")
 
-# Ancore di ordinamento (frazioni del frame): NON sono punti di tap, servono solo a
-# scegliere il blob di erba piu' esterno verso l'angolo richiesto.
+# Ancore di ordinamento (frazioni del frame): NON sono punti di tap, servono a ordinare
+# i candidati verso l'angolo richiesto. NON sono gli angoli dello schermo: l'area
+# deployabile reale e' **l'anello di erba fuori dalle mura nemiche**, quindi le ancore
+# sono i 4 angoli di quell'anello (misura live 23 nov 2026; validi con la base centrata).
 BATTLE_CORNER_ANCHORS: dict[str, tuple[float, float]] = {
-    "nw": (0.02, 0.07),
-    "ne": (0.98, 0.07),
-    "sw": (0.02, 0.85),
-    "se": (0.98, 0.85),
+    "nw": (0.22, 0.18),
+    "ne": (0.78, 0.18),
+    "sw": (0.15, 0.50),
+    "se": (0.85, 0.50),
 }
+
+# Punti fissi di fallback sull'anello esterno (frazioni del frame). Verificato live il
+# 23 nov 2026: (0,50 W, 0,12 H) alto-centro, (0,10, 0,50) lato sinistro e (0,90, 0,50)
+# lato destro **deployano davvero**; sono l'ultima risorsa se il rilevamento erba fallisce.
+BATTLE_RING_POINTS: tuple[tuple[float, float], ...] = (
+    (0.50, 0.12),
+    (0.30, 0.14),
+    (0.70, 0.14),
+    (0.10, 0.32),
+    (0.90, 0.32),
+    (0.10, 0.50),
+    (0.90, 0.50),
+    (0.22, 0.50),
+    (0.78, 0.50),
+)
 
 # Zone in cui NON si deve tappare in anteprima/battaglia (x0, y0, x1, y1 in frazioni).
 # Un tap sbagliato qui puo' spendere oro (Next ~1100, Boost Army), aprire HUD/pannelli
@@ -340,6 +359,40 @@ BATTLE_FORBIDDEN_TAP_ZONES: tuple[tuple[float, float, float, float], ...] = (
     (0.78, 0.62, 1.00, 0.87),  # Next / Overall Damage (basso destra)
     (0.36, 0.00, 0.64, 0.10),  # timer battaglia (alto centro)
 )
+
+
+# Dialogo di conferma fine battaglia "SURRENDER?" (UI nov 2026): modal chiaro al centro
+# con due pulsanti -- Cancel (arancio, sinistra) e Okay (verde, destra). Misura live
+# 23 nov 2026 (1733x975): Okay ~ (0,512-0,661 W, 0,542-0,626 H), aspetto ~3,1.
+SURRENDER_OK_REGION = (0.44, 0.46, 0.30, 0.22)  # (x, y, w, h) frazioni
+
+
+def find_surrender_ok(image: np.ndarray) -> tuple[int, int] | None:
+    """Centro del pulsante verde **Okay** del dialogo "SURRENDER?" (altrimenti ``None``).
+
+    Serve a confermare l'uscita anticipata dalla battaglia: con la UI di nov 2026 il
+    pulsante rosso in basso a sinistra si chiama "Surrender" e apre questo dialogo.
+    """
+    if not _valid(image):
+        return None
+    h, w = image.shape[:2]
+    x0, y0, rw, rh = SURRENDER_OK_REGION
+    x1, y1 = int(w * (x0 + rw)), int(h * (y0 + rh))
+    hsv = _hsv(image)
+    mask = cv2.inRange(hsv, GREEN_BUTTON_LOW, GREEN_BUTTON_HIGH)
+    mask[: int(h * y0), :] = 0
+    mask[y1:, :] = 0
+    mask[:, : int(w * x0)] = 0
+    mask[:, x1:] = 0
+    components = _components(mask, min_area=int(0.0030 * w * h))
+    for component in components:
+        _area, cx, cy, _x, _y, cw, ch = component
+        if cw < 0.08 * w or not (0.040 * h <= ch <= 0.100 * h):
+            continue
+        if not (2.2 <= cw / max(1, ch) <= 5.2):
+            continue
+        return cx, cy
+    return None
 
 
 def battle_tap_is_safe(image: np.ndarray, point: tuple[int, int]) -> bool:
@@ -365,7 +418,7 @@ def battle_corner_anchor(image: np.ndarray, corner: str) -> tuple[int, int]:
 
 
 def grass_deploy_blobs(
-    image: np.ndarray, *, min_area_fraction: float = 0.002
+    image: np.ndarray, *, min_area_fraction: float = 0.0015
 ) -> list[tuple[int, int, int]]:
     """Blob di **erba libera deployabile** nel campo: lista ``(x, y, area)``.
 
@@ -397,37 +450,58 @@ def grass_deploy_blobs(
     return blobs
 
 
-def find_corner_deploy_point(image: np.ndarray, corner: str) -> tuple[int, int] | None:
-    """Punto di deploy (centroide di erba libera) il piu' vicino all'angolo ``corner``.
+def deploy_candidates_for_corner(image: np.ndarray, corner: str) -> list[tuple[int, int]]:
+    """Punti di deploy candidati per l'angolo ``corner``, **in ordine di preferenza**.
 
-    Ordine di scelta:
-    1. blob di erba nella **meta' del frame** dell'angolo scelto (es. ``nw`` = sinistra+alto),
-       il piu' vicino all'angolo: e' la fascia esterna della mappa, lontana dagli edifici;
-    2. se in quella meta' non c'e' erba visibile, il blob piu' vicino all'angolo fra tutti
-       (il chiamante puo' pannare la camera e riprovare);
-    3. ``None`` se non c'e' erba deployabile (il chiamante usa i fallback).
+    Le truppe si possono schierare solo sull'**anello di erba fuori dalle mura** nemiche:
+    i tap sul villaggio (o su un edificio) aprono l'ispezione e non deployano (verificato
+    live 23 nov 2026). Ordine dei candidati:
+    1. blob di erba **periferica** (lontani dal centro: fuori dal villaggio), dal piu'
+       vicino all'angolo scelto;
+    2. punti fissi dell'anello esterno (:data:`BATTLE_RING_POINTS`) vicini all'angolo;
+    3. qualsiasi altro blob di erba sicuro (sempre dal piu' vicino all'angolo);
+    4. griglia sicura (:func:`battle_field_grid`) come ultima risorsa.
     """
     if not _valid(image) or corner not in CORNER_NAMES:
-        return None
+        return []
     h, w = image.shape[:2]
-    blobs = grass_deploy_blobs(image)
-    if not blobs:
-        return None
     anchor = battle_corner_anchor(image, corner)
     center_x, center_y = w * 0.5, h * 0.45
-    sign_x = -1 if corner in ("nw", "sw") else 1
-    sign_y = -1 if corner in ("nw", "ne") else 1
+    min_peripheral = 0.28 * min(w, h)
 
-    def in_quadrant(blob: tuple[int, int, int]) -> bool:
-        return (blob[0] - center_x) * sign_x >= 0 and (blob[1] - center_y) * sign_y >= 0
+    def distance_to_anchor(point: tuple[int, int]) -> float:
+        return ((point[0] - anchor[0]) ** 2 + (point[1] - anchor[1]) ** 2) ** 0.5
 
-    quadrant = [blob for blob in blobs if in_quadrant(blob)]
-    pool = quadrant or blobs
-    best = min(
-        pool,
-        key=lambda blob: (blob[0] - anchor[0]) ** 2 + (blob[1] - anchor[1]) ** 2,
-    )
-    return best[0], best[1]
+    def peripheral(point: tuple[int, int]) -> bool:
+        return ((point[0] - center_x) ** 2 + (point[1] - center_y) ** 2) ** 0.5 >= min_peripheral
+
+    candidates: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def add(point: tuple[int, int]) -> None:
+        key = (int(point[0]), int(point[1]))
+        if key in seen or not battle_tap_is_safe(image, key):
+            return
+        seen.add(key)
+        candidates.append(key)
+
+    blobs = [(x, y) for x, y, _area in grass_deploy_blobs(image)]
+    for point in sorted((b for b in blobs if peripheral(b)), key=distance_to_anchor):
+        add(point)
+    ring = [deploy_point(image, fraction) for fraction in BATTLE_RING_POINTS]
+    for point in sorted(ring, key=distance_to_anchor):
+        add(point)
+    for point in sorted((b for b in blobs if not peripheral(b)), key=distance_to_anchor):
+        add(point)
+    for point in battle_field_grid(image):
+        add(point)
+    return candidates
+
+
+def find_corner_deploy_point(image: np.ndarray, corner: str) -> tuple[int, int] | None:
+    """Primo punto di deploy candidato per l'angolo ``corner`` (o ``None``)."""
+    candidates = deploy_candidates_for_corner(image, corner)
+    return candidates[0] if candidates else None
 
 
 # risultati battaglia: pulsante verde "Return Home" in basso al centro (misura live
@@ -822,6 +896,7 @@ def center(rect: Rect) -> tuple[int, int]:
 __all__ = [
     "BATTLE_CORNER_ANCHORS",
     "BATTLE_FORBIDDEN_TAP_ZONES",
+    "BATTLE_RING_POINTS",
     "BUILDERS_REGION",
     "CORNER_NAMES",
     "RESOURCES_REGION",
@@ -829,6 +904,7 @@ __all__ = [
     "battle_tap_is_safe",
     "builders_region",
     "center",
+    "deploy_candidates_for_corner",
     "find_battle_button",
     "find_build_button",
     "find_build_panel",
@@ -840,6 +916,7 @@ __all__ = [
     "find_menu_close",
     "find_placement_exit",
     "find_row_bands",
+    "find_surrender_ok",
     "grass_deploy_blobs",
     "resources_region",
 ]

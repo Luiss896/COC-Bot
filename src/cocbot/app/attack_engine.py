@@ -328,6 +328,7 @@ class CornerDeploy:
     point: tuple[int, int] | None
     on_grass: bool
     corner: str
+    deployed: int = 0
 
 
 def pick_deploy_corner(
@@ -532,21 +533,37 @@ class AttackEngine(UpgradeEngine):
         raggiunge la schermata risultati (o la home), False se non e' riuscito.
         """
         image = self.grab()
-        button = ui.find_end_battle_button(image)
-        if button is None:
-            self.log("end_battle_early: pulsante End Battle non trovato")
-            return False
-        self.log("end_battle_early: premo 'End Battle' durante la battaglia")
-        self._tap(ui.center(button), wait_s=1.2)
+        state_now = states.classify(image)
+        if state_now is ScreenState.BATTLE_CONFIRM:
+            # il dialogo "SURRENDER?" e' gia' aperto (click precedente): conferma e basta
+            okay = ui.find_surrender_ok(image)
+            if okay is None:
+                self.log("end_battle_early: dialogo SURRENDER senza pulsante Okay")
+                return False
+            self.log("end_battle_early: dialogo SURRENDER gia' aperto, confermo 'Okay'")
+            self._tap(okay, wait_s=1.5)
+        else:
+            button = ui.find_end_battle_button(image)
+            if button is None:
+                self.log("end_battle_early: pulsante End Battle/Surrender non trovato")
+                return False
+            self.log("end_battle_early: premo 'End Battle'/'Surrender' durante la battaglia")
+            self._tap(ui.center(button), wait_s=1.2)
         deadline = time.monotonic() + confirm_timeout_s
         while time.monotonic() < deadline:
             frame = self.grab()
             state = states.classify(frame)
             if state in (ScreenState.BATTLE_END, ScreenState.HOME):
                 return True
-            # il bottone CONFIRM va cercato SOLO su un dialogo di conferma: in BATTLE
-            # la barra truppe ha elementi verdi che producevano falsi positivi (tap sul
-            # campo al posto della conferma).
+            # dialogo "SURRENDER?" della UI nov 2026: il pulsante verde "Okay" conferma.
+            if state is ScreenState.BATTLE_CONFIRM:
+                okay = ui.find_surrender_ok(frame)
+                if okay is not None:
+                    self.log("end_battle_early: confermo 'Okay' nel dialogo SURRENDER")
+                    self._tap(okay, wait_s=1.5)
+                    continue
+            # fallback UI precedente: CONFIRM verde SOLO su un dialogo di conferma
+            # (in BATTLE la barra truppe ha elementi verdi che producono falsi positivi).
             confirm = (
                 ui.find_confirm_button(frame)
                 if state is ScreenState.UPGRADE_CONFIRM
@@ -555,7 +572,7 @@ class AttackEngine(UpgradeEngine):
             if confirm is not None:
                 self.log("end_battle_early: confermo la fine battaglia")
                 self._tap(ui.center(confirm), wait_s=1.2)
-            time.sleep(0.5)
+            time.sleep(0.4)
         return self._wait_state(ScreenState.BATTLE_END, timeout_s=15.0) is not None
 
     def _hud_text(self) -> str | None:
@@ -624,6 +641,7 @@ class AttackEngine(UpgradeEngine):
             "strategy": None,
             "corner": None,
             "invisibility": None,
+            "dragon_deployed": 0,
             "deploy_phase": None,
             "deploy_point": None,
             "deploy_on_grass": None,
@@ -868,6 +886,11 @@ class AttackEngine(UpgradeEngine):
                 state = None
             if state is ScreenState.PREVIEW:
                 self.end_battle()
+            elif state is ScreenState.BATTLE_CONFIRM:
+                okay = ui.find_surrender_ok(self.grab())
+                if okay is not None:
+                    self._tap(okay, wait_s=1.5)
+                self.return_home()
             elif state is ScreenState.BATTLE_END:
                 self.return_home()
 
@@ -1069,29 +1092,24 @@ class AttackEngine(UpgradeEngine):
         self.log(f"deploy_corner: panno la camera verso {corner.upper()} (dx={dx:+.2f} dy={dy:+.2f})")
         self.pan_camera(dx, dy, image=image)
 
-    def _corner_deploy_point(
-        self, image: np.ndarray, corner: str
-    ) -> tuple[tuple[int, int] | None, bool]:
-        """Punto di deploy per l'angolo: erba nell'angolo, poi erba globale, poi griglia.
+    @staticmethod
+    def _troop_counter_region(image: np.ndarray) -> Rect:
+        """Regione del contatore "xN" sulla card draghi (verifica visiva del deploy)."""
+        h, w = image.shape[:2]
+        return Rect(int(w * 0.168), int(h * 0.848), int(w * 0.042), int(h * 0.034))
 
-        Ritorna ``(punto, on_grass)``; ``(None, False)`` se non c'e' nessun punto sicuro.
-        """
-        point = ui.find_corner_deploy_point(image, corner)
-        if point is not None:
-            return point, True
-        for candidate in ui.find_deploy_candidates(image, limit=10):
-            if ui.battle_tap_is_safe(image, candidate):
-                self.log(
-                    "deploy_corner: nessuna erba libera nell'angolo, uso l'erba piu' vicina al centro"
-                )
-                return candidate, True
-        for candidate in ui.battle_field_grid(image):
-            if ui.battle_tap_is_safe(image, candidate):
-                self.log(
-                    "deploy_corner: nessuna erba, uso un punto di griglia sicuro (rischio ispezione)"
-                )
-                return candidate, False
-        return None, False
+    def _troop_counter_changed(self, before: np.ndarray, after: np.ndarray) -> bool:
+        """True se il contatore truppe della card e' cambiato (una truppa e' scesa)."""
+        if before is None or after is None or before.shape != after.shape:
+            return False
+        return self._region_diff(before, after, self._troop_counter_region(after)) > 6.0
+
+    def _tap_and_verify(self, point: tuple[int, int], *, wait_s: float) -> bool:
+        """Tappa ``point`` e dice (dal contatore card) se la truppa e' stata schierata."""
+        before = self.grab()
+        self._tap(point, wait_s=wait_s)
+        after = self.grab()
+        return self._troop_counter_changed(before, after)
 
     @staticmethod
     def _offset_towards_center(
@@ -1132,55 +1150,85 @@ class AttackEngine(UpgradeEngine):
         invisibility: int = 0,
         invisibility_card_slot: int | None = None,
     ) -> CornerDeploy:
-        """Strategia "dragon corner": tutti i draghi in un solo punto di un angolo della mappa.
+        """Strategia "dragon corner": tutti i draghi su un punto dell'anello esterno.
 
-        Meccanica:
-        - il punto e' il centroide di **erba libera** piu' vicino all'angolo scelto (fascia
-          esterna della mappa: il tap li' deploya sempre, niente ispezioni di edifici);
-        - la card draghi si seleziona **una sola volta** e resta selezionata: N tap sullo stesso
-          punto schierano N draghi ("in un'unica volta", intervallo ``deploy_interval_s``);
-        - poi le **Invisibility Spell** (``attack.invisibility_card_slot``, 0 = primo slot) sui
-          draghi, una card+tap per spell;
-        - infine gli **eroi** dietro ai draghi (spostati verso il centro villaggio).
-        Ritorna :class:`CornerDeploy` (tap inviati, punto scelto, se era erba).
+        Lezione del live (23 nov 2026): si puo' deployare **solo sull'erba fuori dalle mura**
+        nemiche; i tap dentro il villaggio (o su un edificio) aprono l'ispezione e **non
+        schierano nulla**. Per questo i candidati sono ordinati per angolo + perifericita' e
+        ogni tap viene **verificato dal contatore della card**: se una truppa non scende si
+        passa al candidato successivo (deploy adattivo, niente tap "alla cieca").
+
+        Ordine: tutti i draghi sullo **stesso punto** finche' funziona (la card selezionata
+        resta attiva); dopo un tap a vuoto la card viene riselezionata e si prova il punto
+        successivo. Poi le **Invisibility Spell** sui draghi e infine gli **eroi**
+        (Barbarian King, Archer Queen, Grand Warden) dietro, verso il villaggio.
+
+        Ritorna :class:`CornerDeploy` con tap inviati, punto efficace, numero di draghi
+        effettivamente deployati.
         """
-        height = image.shape[0]
-        point, on_grass = self._corner_deploy_point(image, corner)
-        if point is None:
+        candidates = ui.deploy_candidates_for_corner(image, corner)
+        if not candidates:
             self.log(f"deploy_corner: nessun punto di deploy per l'angolo {corner.upper()}")
             return CornerDeploy(0, None, False, corner)
         interval = float(self.config.attack.deploy_interval_s)
+        max_dragons = max(0, dragons)
         card = ui.battle_card_point(image, ui.BATTLE_DRAGON_CARD)
+        grass_points = {(x, y) for x, y, _area in ui.grass_deploy_blobs(image)}
         self.log(
-            f"deploy_corner: angolo {corner.upper()} · {max(0, dragons)} draghi tutti su {point}"
-            f" (erba={on_grass}, intervallo {interval:.2f}s)"
+            f"deploy_corner: angolo {corner.upper()} · {max_dragons} draghi sull'anello esterno,"
+            f" {len(candidates)} candidati, intervallo {interval:.2f}s"
         )
-        self._tap(card, wait_s=0.2)
+        self._tap(card, wait_s=0.25)
         taps = 1
-        for _ in range(max(0, dragons)):
-            self._tap(point, wait_s=interval)
+        deployed = 0
+        index = 0
+        attempts = 0
+        max_attempts = max_dragons + 5  # limite anti-tap-alla-cieca se nessun punto funziona
+        point = candidates[0]
+        while deployed < max_dragons and index < len(candidates) and attempts < max_attempts:
+            attempts += 1
+            point = candidates[index]
+            if self._tap_and_verify(point, wait_s=interval):
+                deployed += 1
+                taps += 1
+                continue  # card ancora selezionata: tutti i draghi restano sullo stesso punto
             taps += 1
+            index += 1
+            if index < len(candidates):
+                self.log(
+                    f"deploy_corner: il tap su {point} non ha schierato (villaggio/edificio), "
+                    f"provo {candidates[index]}"
+                )
+                self._tap(card, wait_s=0.15)  # un tap a vuoto puo' aver deselezionato la card
+                taps += 1
+        effective = point if deployed else None
+        self.log(f"deploy_corner: draghi deployati={deployed}/{max_dragons} · punto={effective}")
         invis_count = max(0, invisibility)
-        if invis_count:
+        if invis_count and effective is not None:
             slot = int(
                 self.config.attack.invisibility_card_slot
                 if invisibility_card_slot is None
                 else invisibility_card_slot
             )
             spell_card = ui.battle_card_point(image, ui.battle_spell_card(slot))
-            targets = self._invisibility_targets(image, point, count=invis_count)
+            targets = self._invisibility_targets(image, effective, count=invis_count)
             self.log(
-                f"deploy_corner: {invis_count} invisibilita' @ card slot {slot} sui draghi in {point}"
+                f"deploy_corner: {invis_count} invisibilita' @ card slot {slot}"
+                f" sui draghi in {effective}"
             )
             for target in targets:
                 self._tap(spell_card, wait_s=0.2)
                 self._tap(target, wait_s=0.35)
                 taps += 2
+        elif invis_count:
+            self.log("deploy_corner: invisibilita' saltate (nessun drago deployato)")
         if heroes:
-            hero_target = self._offset_towards_center(image, point, 0.04)
+            hero_base = effective or candidates[0]
+            hero_target = self._offset_towards_center(image, hero_base, 0.04)
             if not ui.battle_tap_is_safe(image, hero_target):
-                hero_target = (point[0], min(height - 1, point[1]))
+                hero_target = hero_base
             for label, fraction in (
+                ("barbarian king", ui.BATTLE_KING_CARD),
                 ("arciere", ui.BATTLE_QUEEN_CARD),
                 ("grand warden", ui.BATTLE_WARDEN_CARD),
             ):
@@ -1189,8 +1237,15 @@ class AttackEngine(UpgradeEngine):
                 self._tap(hero_card, wait_s=0.2)
                 self._tap(hero_target, wait_s=0.2)
                 taps += 2
+        on_grass = effective is not None and effective in grass_points
         self.log(f"deploy_corner: completato, tap={taps}")
-        return CornerDeploy(taps=taps, point=point, on_grass=on_grass, corner=corner)
+        return CornerDeploy(
+            taps=taps,
+            point=effective,
+            on_grass=on_grass,
+            corner=corner,
+            deployed=deployed,
+        )
 
     def deploy_corner_phase(
         self,
@@ -1202,18 +1257,26 @@ class AttackEngine(UpgradeEngine):
         invisibility: int,
         invisibility_card_slot: int | None,
     ) -> bool:
-        """Deploy DRAGON CORNER **subito**, senza aspettare i ~30 s del countdown.
+        """Attende l'inizio della battaglia (poll rapido) e deploya subito il DRAGON CORNER.
 
-        Sequenza:
-        1. panna la camera verso l'angolo e deploya subito mentre siamo in ``PREVIEW`` (davanti
-           al countdown "Battle starts in: ~30s"): se il gioco accetta i tap la battaglia parte
-           immediatamente e si risparmiano quei secondi; se li ignora non succede nulla di male
-           (tap solo su erba/punti filtrati, mai su Next/End Battle/Boost);
-        2. se lo stato e' ancora ``PREVIEW``, attende l'inizio della battaglia (poll ~0.2 s) e
-           **ripete il deploy**: il raid attacca in ogni caso, senza perdere truppe (se erano
-           gia' scese, le card sono vuote e i tap non hanno effetto).
+        Verificato live il 23 nov 2026: durante il countdown "Battle starts in" (i ~30 s
+        dell'anteprima) il gioco **ignora i tap di deploy**: non e' possibile schierare prima
+        che la battaglia inizi. Il bot quindi non spreca tap in anteprima: attende l'inizio
+        con polling ~0,2 s e deploya al primo frame di ``BATTLE`` (nessun'altra attesa),
+        panna la camera verso l'angolo e usa il deploy adattivo con verifica del contatore.
+
         Ritorna ``True`` se la battaglia e' iniziata, ``False`` se non e' iniziata (timeout).
         """
+        report["deploy_phase"] = "battle"
+        # documentato nel report: i tap in anteprima non sono possibili (li ignora il gioco)
+        report["preview_deploy_ignored"] = True
+        wait_started = time.monotonic()
+        timeout_s = max(40.0, float(self.config.attack.max_battle_duration_s))
+        if not self.wait_battle_start(timeout_s=timeout_s):
+            report["action"] = "battle_not_started"
+            report["battle_wait_s"] = round(time.monotonic() - wait_started, 2)
+            return False
+        report["battle_wait_s"] = round(time.monotonic() - wait_started, 2)
         started = time.monotonic()
         frame = self.grab()
         if self.config.attack.corner_pan:
@@ -1228,49 +1291,10 @@ class AttackEngine(UpgradeEngine):
             invisibility_card_slot=invisibility_card_slot,
         )
         report["deploy_taps"] = int(outcome.taps)
+        report["dragon_deployed"] = int(outcome.deployed)
         report["deploy_point"] = outcome.point
         report["deploy_on_grass"] = outcome.on_grass
-        report["deploy_phase"] = "preview"
         report["deploy_started_after_s"] = round(time.monotonic() - started, 2)
-        state = states.classify(self.grab())
-        if state is ScreenState.BATTLE:
-            report["battle_started_by_deploy"] = True
-            self.log("deploy_corner: deploy accettato in anteprima: battaglia iniziata subito")
-            return True
-        if state in (ScreenState.BATTLE_END, ScreenState.HOME):
-            return True
-        if state is ScreenState.PREVIEW:
-            report["preview_deploy_ignored"] = True
-            self.log(
-                "deploy_corner: i tap in anteprima non avviano la battaglia (countdown attivo): "
-                "ripeto il deploy appena parte"
-            )
-        else:
-            self.log(
-                f"deploy_corner: stato {state.value} dopo il deploy in anteprima: attendo l'inizio"
-            )
-        wait_started = time.monotonic()
-        timeout_s = max(40.0, float(self.config.attack.max_battle_duration_s))
-        if not self.wait_battle_start(timeout_s=timeout_s):
-            report["action"] = "battle_not_started"
-            return False
-        report["battle_wait_s"] = round(time.monotonic() - wait_started, 2)
-        frame = self.grab()
-        if self.config.attack.corner_pan:
-            self.pan_camera_towards_corner(corner, image=frame)
-            frame = self.grab()
-        outcome = self.deploy_dragon_corner(
-            frame,
-            corner=corner,
-            dragons=dragons,
-            heroes=heroes,
-            invisibility=invisibility,
-            invisibility_card_slot=invisibility_card_slot,
-        )
-        report["deploy_taps"] = int(report.get("deploy_taps") or 0) + int(outcome.taps)
-        report["deploy_point"] = outcome.point
-        report["deploy_on_grass"] = outcome.on_grass
-        report["deploy_phase"] = "battle"
         return True
 
     def deploy_spells(self, image: np.ndarray, *, count: int = 5) -> int:

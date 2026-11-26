@@ -42,6 +42,10 @@ def classify(image: np.ndarray) -> ScreenState:
         return ScreenState.PLACEMENT
     if ui.find_attack_button(image) is not None and ui.find_army_panel_close(image) is not None:
         return ScreenState.ARMY_REVIEW
+    # dialogo di conferma fine battaglia "SURRENDER?" (UI nov 2026): pulsante verde Okay.
+    # Va distinto dalla schermata risultati (che ha Return Home in basso al centro).
+    if ui.find_surrender_ok(image) is not None:
+        return ScreenState.BATTLE_CONFIRM
     # risultati battaglia: "Return Home" verde in basso al centro **senza** il pulsante
     # "End Battle" (che invece c'e' in battaglia). Nella barra truppe ci sono elementi verdi
     # (es. "Boost Heroes") che possono somigliare al pulsante: la presenza di End Battle
@@ -88,6 +92,7 @@ def describe(state: ScreenState) -> str:
         ScreenState.ARMY_REVIEW: "anteprima esercito pre-battaglia (My Army, pulsante Attack!)",
         ScreenState.PREVIEW: "anteprima base (loot + End Battle + Next)",
         ScreenState.BATTLE: "battaglia in corso (End Battle)",
+        ScreenState.BATTLE_CONFIRM: "dialogo di conferma fine battaglia (SURRENDER?)",
         ScreenState.BATTLE_END: "risultati battaglia (Return Home)",
         ScreenState.BUILD_MENU: "menu Build (Buildings & Heroes)",
         ScreenState.UPGRADE_CONFIRM: "dialogo conferma upgrade",

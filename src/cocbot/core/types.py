@@ -112,6 +112,7 @@ class ScreenState(StrEnum):
     ARMY_REVIEW = "army_review"
     PREVIEW = "preview"
     BATTLE = "battle"
+    BATTLE_CONFIRM = "battle_confirm"  # dialogo "SURRENDER?" (conferma fine battaglia)
     BATTLE_END = "battle_end"
     BUILD_MENU = "build_menu"
     UPGRADE_CONFIRM = "upgrade_confirm"

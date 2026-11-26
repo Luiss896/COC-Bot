@@ -1,6 +1,6 @@
 # ADR-007 — Strategia d'attacco DRAGON CORNER: angoli casuali, deploy immediato, invisibilità
 
-**Data:** 2026-11-23 · **Stato:** implementata, testata offline; validazione live da fare
+**Data:** 2026-11-23 · **Stato:** implementata e **validata live** (23 nov 2026); aggiornata dopo il live con deploy adattivo, nuovo dialogo SURRENDER e layout card nov 2026
 **Sostituisce:** il deploy di default DRAGON CLONE di ADR-005 (che resta selezionabile).
 
 ## Contesto (richiesta utente, 23 nov 2026)
@@ -72,15 +72,47 @@ volta** in quel punto, poi le **Invisibility Spell** ("le relative invisibilità
   per angolo, frame reali, ordine dei tap, fallback, fase immediata + fallback countdown, CLI,
   config).
 
+## Aggiornamento dopo il live del 23 nov 2026 (gioco aperto, 3 raid di test)
+
+Cosa ha insegnato il gioco reale (finestra 1733×975, UI nov 2026):
+
+1. **Il deploy in anteprima NON è possibile**: durante il countdown "Battle starts in" il gioco
+   **ignora i tap** (testato: tap su erba con card selezionata → nessuna truppa schierata).
+   Il bot quindi non tenta più tap in anteprima: attende l'inizio con polling ~0,2 s e deploya
+   al primo istante utile (`deploy_phase="battle"`, `battle_wait_s` nel report). È il minimo
+   imposto dal gioco, quei ~30 s non sono eliminabili.
+2. **Si può deployare solo sull'erba FUORI dalle mura**: i tap dentro il villaggio aprono
+   l'ispezione e non schierano (era la causa dei "draghi/eroi non deployati"). Verificati live:
+   alto-centro (0,50 W · 0,12 H), lato sinistro (0,10 · 0,50) e lato destro (0,90 · 0,50)
+   deployano; centro, basso e angolo alto-destra (fuori mappa/edifici) no.
+3. **Deploy adattivo**: per non dipendere da un singolo punto, ogni tap viene verificato dal
+   **contatore "xN" della card** (diff immagine): se la truppa non scende si passa al candidato
+   successivo (max `draghi+5` tentativi). Il live ha confermato la bontà del rilevamento
+   (diff 0,0 sui tap a vuoto vs 14-96 sui deploy riusciti).
+4. **Layout card cambiato**: la barra truppe ora include il **Barbarian King**: draghi 0,164 ·
+   King 0,237 · Queen 0,310 · Warden 0,383 · spell 0,446 (prima spell a 0,383). Il bot ora
+   deploya **3 eroi**.
+5. **Nuovo dialogo "SURRENDER?"**: il pulsante rosso in battaglia ora si chiama "Surrender" e
+   apre un modal con **Cancel** (arancio) e **Okay** (verde). Aggiunto lo stato
+   `BATTLE_CONFIRM`, il rilevamento `ui.find_surrender_ok` e la conferma in
+   `end_battle_early`/`recover_home` (senza, il bot restava bloccato sul dialogo).
+6. **Soglie 800k**: con oro/elisir ≥ 800k ciascuno le basi valide sono più rare: nei test
+   6 ricerche non hanno trovato una base ≥800k (spesa ~6.600 oro, nessun attacco). Per il farm
+   conviene alzare «Ricerche max» (es. 10-20) o abbassare le soglie in config.
+7. Frame reali salvati in locale (gitignored): `dataset/build-win-20261123/` — usati dai test
+   (`tests/test_attack_corner.py`) per classificazione SURRENDER, card e punti candidati.
+
 ## Rischi e limiti noti
 
-- **Tap in anteprima**: non è ancora validato live se il gioco accetta il deploy durante il
-  countdown. Il fallback garantisce il deploy a battaglia iniziata; da verificare in un raid
-  supervisionato (`attack-run --allow-spend --max-searches 1 --corner se`) leggendo
-  `deploy_phase`/`battle_started_by_deploy`/`battle_wait_s` nel report e nei log.
-- **`invisibility_card_slot`**: l'ordine delle card spell dipende dall'esercito dell'utente
-  (l'ipotesi default è 0 = primo slot, coerente con il frame di My Army del 18 nov). Se
-  l'invisibilità non è il primo slot, cambiare `attack.invisibility_card_slot` in config.
+- **Countdown**: il deploy immediato "vero" non esiste (lo impone il gioco); il bot deploya al
+  primo frame di battaglia e lo riporta nel report. Non provare a deployare in anteprima.
+- **`invisibility_card_slot`**: l'ordine delle card dipende dall'esercito; con l'esercito attuale
+  l'invisibilità è lo slot 0 (x5, verificato sul frame live del 23 nov). Se cambia, aggiornare
+  `attack.invisibility_card_slot`.
+- **Card eroi**: le posizioni (King/Queen/Warden) sono quelle del layout nov 2026; se un eroe è
+  in upgrade la barra si compatta e le posizioni possono slittare (da rivedere in quel caso).
+- **Max tentativi**: se nessun candidato deploya il bot si ferma dopo `draghi+5` tap e schiera
+  comunque gli eroi sul primo candidato (per non sprecare il raid).
 - **Soglie alte**: con oro/elisir ≥ 800k ciascuno le basi valide sono più rare; aumentare
   «Ricerche max»/`--max-searches` (ogni ricerca costa ~1.100 oro) o abbassare le soglie se il
   farm salta troppe basi.

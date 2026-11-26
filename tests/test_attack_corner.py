@@ -1,12 +1,15 @@
-"""Test della strategia DRAGON CORNER (23 nov 2026).
+"""Test della strategia DRAGON CORNER (aggiornati dopo il live del 23 nov 2026).
 
 Coprono:
 - scelta dell'angolo (casuale e forzata) e direzione del pan camera;
-- rilevamento dell'erba deployabile per angolo con filtro delle zone vietate;
-- deploy completo (draghi in un punto -> invisibilità -> eroi);
-- fase di deploy **immediata** in anteprima con fallback all'inizio della battaglia;
-- frame reali del dataset locale (angoli deployabili e pulsanti esclusi);
-- argomenti CLI e config.
+- erba deployabile per angolo e filtro delle zone vietate;
+- deploy **adattivo** con verifica del contatore (draghi tutti sullo stesso punto, si cambia
+  punto solo se il tap non schiera);
+- Invisibility Spell e 3 eroi (King, Queen, Warden);
+- fase di deploy al primo istante della battaglia (il countdown e' imposto dal gioco);
+- dialogo "SURRENDER?" (UI nov 2026) e conferma Okay;
+- card della barra truppe del layout attuale (King in barra: spell a 0,446);
+- frame reali del 23 nov 2026 (dataset locale) e argomenti CLI/config.
 """
 from __future__ import annotations
 
@@ -25,17 +28,18 @@ from cocbot.app.attack_engine import (
     pick_deploy_corner,
 )
 from cocbot.config.models import Config
-from cocbot.vision import ui
+from cocbot.core.types import ScreenState
+from cocbot.vision import states, ui
 
 IMAGE = np.zeros((975, 1733, 3), dtype=np.uint8)
 
-BUILD_DATASET = Path(__file__).resolve().parents[1] / "dataset" / "build-win-20261103"
-_HAS_BUILD = (BUILD_DATASET / "battle-phase-window.png").is_file()
-build_dataset = pytest.mark.skipif(not _HAS_BUILD, reason="frame locali assenti (gitignored)")
+LIVE_DATASET = Path(__file__).resolve().parents[1] / "dataset" / "build-win-20261123"
+_HAS_LIVE = (LIVE_DATASET / "diagnostica-battle-start.png").is_file()
+live_dataset = pytest.mark.skipif(not _HAS_LIVE, reason="frame live 23 nov assenti (gitignored)")
 
 
-def _load_build(name: str) -> np.ndarray:
-    image = cv2.imread(str(BUILD_DATASET / name))
+def _load_live(name: str) -> np.ndarray:
+    image = cv2.imread(str(LIVE_DATASET / name))
     assert image is not None, f"frame assente: {name}"
     return image
 
@@ -47,6 +51,7 @@ def _fake_engine() -> tuple[attack_engine.AttackEngine, list[tuple[tuple[int, in
     engine.log = engine.logs.append
     taps: list[tuple[tuple[int, int], float | None]] = []
     engine._tap = lambda point, wait_s=None: taps.append((point, wait_s))
+    engine.grab = lambda: IMAGE
     return engine, taps
 
 
@@ -127,108 +132,151 @@ def test_find_corner_deploy_point_picks_the_quadrant() -> None:
     assert ui.find_corner_deploy_point(image, "boh") is None
 
 
+def test_deploy_candidates_are_ordered_and_safe() -> None:
+    image = _grass_image()
+    candidates = ui.deploy_candidates_for_corner(image, "se")
+    assert candidates
+    for point in candidates:
+        assert ui.battle_tap_is_safe(image, point)
+    assert len(set(candidates)) == len(candidates)
+
+
 def test_battle_tap_is_safe_rejects_buttons() -> None:
-    image = np.zeros((975, 1733, 3), dtype=np.uint8)
-    h, w = image.shape[:2]
-    assert ui.battle_tap_is_safe(image, (int(w * 0.50), int(h * 0.45)))
-    # End Battle (basso sinistra), Next (basso destra), barra truppe, HUD
-    assert not ui.battle_tap_is_safe(image, (int(w * 0.059), int(h * 0.790)))
-    assert not ui.battle_tap_is_safe(image, (int(w * 0.930), int(h * 0.730)))
-    assert not ui.battle_tap_is_safe(image, (int(w * 0.164), int(h * 0.911)))
-    assert not ui.battle_tap_is_safe(image, (int(w * 0.900), int(h * 0.050)))
+    assert ui.battle_tap_is_safe(IMAGE, (int(IMAGE.shape[1] * 0.50), int(IMAGE.shape[0] * 0.45)))
+    # Surrender (basso sinistra), Next (basso destra), barra truppe, HUD
+    assert not ui.battle_tap_is_safe(IMAGE, (int(1733 * 0.059), int(975 * 0.790)))
+    assert not ui.battle_tap_is_safe(IMAGE, (int(1733 * 0.930), int(975 * 0.730)))
+    assert not ui.battle_tap_is_safe(IMAGE, (int(1733 * 0.164), int(975 * 0.911)))
+    assert not ui.battle_tap_is_safe(IMAGE, (int(1733 * 0.900), int(975 * 0.050)))
 
 
-@build_dataset
-def test_real_frames_have_safe_corner_points() -> None:
-    for name in ("battle-phase-window.png", "scout-screen-window.png"):
-        image = _load_build(name)
-        assert ui.grass_deploy_blobs(image), name
-        for corner in ui.CORNER_NAMES:
-            point = ui.find_corner_deploy_point(image, corner)
-            assert point is not None, (name, corner)
-            assert ui.battle_tap_is_safe(image, point), (name, corner, point)
+def test_card_bar_layout_nov_2026() -> None:
+    """Layout UI nov 2026: King in barra, quindi AQ/GW/spell una posizione piu' a destra."""
+    assert ui.BATTLE_DRAGON_CARD == (0.164, 0.911)
+    assert ui.BATTLE_KING_CARD == (0.237, 0.911)
+    assert ui.BATTLE_QUEEN_CARD == (0.310, 0.911)
+    assert ui.BATTLE_WARDEN_CARD == (0.383, 0.911)
+    assert ui.BATTLE_SPELL_CARD == (0.446, 0.911)
+    step = ui.battle_spell_card(1)[0] - ui.battle_spell_card(0)[0]
+    assert step == pytest.approx(ui.BATTLE_CARD_STEP, abs=1e-3)
 
 
-@build_dataset
-def test_real_buttons_are_forbidden_but_field_is_allowed() -> None:
-    image = _load_build("scout-screen-window.png")
-    end = ui.find_end_battle_button(image)
-    next_button = ui.find_next_button(image)
-    assert end is not None and next_button is not None
-    assert not ui.battle_tap_is_safe(image, ui.center(end))
-    assert not ui.battle_tap_is_safe(image, ui.center(next_button))
-    # un punto di erba trovato dalla strategia e' sicuro
-    point = ui.find_corner_deploy_point(image, "se")
-    assert point is not None and ui.battle_tap_is_safe(image, point)
+# --------------------------------------------------------------------------- frame reali
+@live_dataset
+def test_live_frames_states_and_surrender_dialog() -> None:
+    assert states.classify(_load_live("diagnostica-battle-start.png")) is ScreenState.BATTLE
+    assert states.classify(_load_live("preview-1.png")) is ScreenState.PREVIEW
+    surrender = _load_live("surrender-dialog.png")
+    assert states.classify(surrender) is ScreenState.BATTLE_CONFIRM
+    assert ui.find_surrender_ok(surrender) is not None
+    # nessun falso positivo sulle altre schermate
+    assert states.classify(_load_live("risultati-1.png")) is ScreenState.BATTLE_END
+    assert ui.find_surrender_ok(_load_live("risultati-1.png")) is None
+    assert ui.find_surrender_ok(_load_live("diagnostica-battle-start.png")) is None
+    assert ui.find_surrender_ok(_load_live("preview-1.png")) is None
+    assert ui.find_return_home_button(_load_live("risultati-1.png")) is not None
+
+
+@live_dataset
+def test_live_battle_frame_has_safe_corner_candidates() -> None:
+    image = _load_live("diagnostica-battle-start.png")
+    for corner in ui.CORNER_NAMES:
+        candidates = ui.deploy_candidates_for_corner(image, corner)
+        assert candidates, corner
+        assert ui.battle_tap_is_safe(image, candidates[0])
+    # il primo candidato del SE e' sul lato destro (anello esterno), non al centro
+    first = ui.deploy_candidates_for_corner(image, "se")[0]
+    assert first[0] > image.shape[1] * 0.55
+    assert ui.battle_tap_is_safe(image, first)
 
 
 # --------------------------------------------------------------------------- deploy
-def test_deploy_dragon_corner_order_and_taps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_dragon_corner_all_on_one_point(monkeypatch: pytest.MonkeyPatch) -> None:
     engine, taps = _fake_engine()
     monkeypatch.setattr(
-        attack_engine.ui, "find_corner_deploy_point", lambda image, corner: (300, 500)
+        attack_engine.ui,
+        "deploy_candidates_for_corner",
+        lambda image, corner: [(300, 500), (600, 300)],
     )
+    calls: list[tuple[int, int]] = []
+
+    def always_ok(point, *, wait_s):
+        calls.append(point)
+        return True
+
+    engine._tap_and_verify = always_ok
     result = engine.deploy_dragon_corner(
         IMAGE, corner="nw", dragons=13, heroes=True, invisibility=5
     )
 
     assert isinstance(result, CornerDeploy)
-    assert result.corner == "nw"
+    assert result.deployed == 13
+    assert result.taps == 1 + 13 + 5 * 2 + 3 * 2  # card + draghi + invis + 3 eroi
     assert result.point == (300, 500)
-    assert result.on_grass is True
-    assert result.taps == 1 + 13 + 5 * 2 + 4
-    assert len(taps) == result.taps
-    # card draghi una sola volta, poi tutti i draghi nello STESSO punto
+    assert calls == [(300, 500)] * 13  # tutti i draghi sullo stesso punto
+    # card draghi selezionata una volta, poi (dopo i tap veri) l'invisibilita' e gli eroi
     assert taps[0][0] == ui.battle_card_point(IMAGE, ui.BATTLE_DRAGON_CARD)
-    assert {point for point, _wait in taps[1:14]} == {(300, 500)}
-    # poi l'invisibilita' (card slot 0) sui draghi...
-    assert taps[14][0] == ui.battle_card_point(IMAGE, ui.battle_spell_card(0))
-    assert taps[15][0] == (300, 500)
-    # ...e infine gli eroi (card + tap spostato verso il villaggio)
-    assert taps[24][0] == ui.battle_card_point(IMAGE, ui.BATTLE_QUEEN_CARD)
-    assert taps[25][0] != (300, 500)
-    assert taps[26][0] == ui.battle_card_point(IMAGE, ui.BATTLE_WARDEN_CARD)
+    assert taps[1][0] == ui.battle_card_point(IMAGE, ui.battle_spell_card(0))
+    hero_cards = {
+        ui.battle_card_point(IMAGE, ui.BATTLE_KING_CARD),
+        ui.battle_card_point(IMAGE, ui.BATTLE_QUEEN_CARD),
+        ui.battle_card_point(IMAGE, ui.BATTLE_WARDEN_CARD),
+    }
+    assert hero_cards <= {point for point, _wait in taps}
 
 
-def test_deploy_dragon_corner_falls_back_to_global_grass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine, taps = _fake_engine()
-    monkeypatch.setattr(attack_engine.ui, "find_corner_deploy_point", lambda image, corner: None)
-    monkeypatch.setattr(
-        attack_engine.ui, "find_deploy_candidates", lambda image, limit=10: [(400, 600)]
-    )
-    result = engine.deploy_dragon_corner(
-        IMAGE, corner="sw", dragons=2, heroes=False, invisibility=0
-    )
-    assert result.on_grass is True
-    assert result.point == (400, 600)
-    assert result.taps == 1 + 2
-
-
-def test_deploy_dragon_corner_uses_safe_grid_as_last_resort(
+def test_deploy_dragon_corner_moves_to_next_point_when_tap_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine, _taps = _fake_engine()
-    monkeypatch.setattr(attack_engine.ui, "find_corner_deploy_point", lambda image, corner: None)
-    monkeypatch.setattr(attack_engine.ui, "find_deploy_candidates", lambda image, limit=10: [])
+    candidates = [(100, 100), (200, 200), (300, 300)]
     monkeypatch.setattr(
-        attack_engine.ui, "battle_field_grid", lambda image: [(866, 438)]
+        attack_engine.ui, "deploy_candidates_for_corner", lambda image, corner: candidates
+    )
+    attempts: list[tuple[int, int]] = []
+
+    def fails_first_two(point, *, wait_s):
+        attempts.append(point)
+        return point == (300, 300)
+
+    engine._tap_and_verify = fails_first_two
+    result = engine.deploy_dragon_corner(
+        IMAGE, corner="se", dragons=13, heroes=False, invisibility=0
+    )
+    assert result.deployed == 13
+    assert result.point == (300, 300)
+    assert attempts[:3] == [(100, 100), (200, 200), (300, 300)]
+    # i punti falliti non vengono riprovati una volta trovato quello efficace
+    assert (100, 100) not in attempts[3:]
+    assert any("non ha schierato" in line for line in engine.logs)
+
+
+def test_deploy_dragon_corner_all_fail_skips_invisibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, taps = _fake_engine()
+    monkeypatch.setattr(
+        attack_engine.ui, "deploy_candidates_for_corner", lambda image, corner: [(10, 10)]
+    )
+    engine._tap_and_verify = lambda point, *, wait_s: False
+    result = engine.deploy_dragon_corner(
+        IMAGE, corner="ne", dragons=13, heroes=True, invisibility=5
+    )
+    assert result.deployed == 0
+    assert result.point is None
+    assert any("invisibilita' saltate" in line for line in engine.logs)
+    # gli eroi vengono comunque schierati (sul primo candidato) per non perdere il raid
+    assert ui.battle_card_point(IMAGE, ui.BATTLE_KING_CARD) in {point for point, _ in taps}
+
+
+def test_deploy_dragon_corner_without_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, taps = _fake_engine()
+    monkeypatch.setattr(
+        attack_engine.ui, "deploy_candidates_for_corner", lambda image, corner: []
     )
     result = engine.deploy_dragon_corner(
-        IMAGE, corner="sw", dragons=1, heroes=False, invisibility=0
+        IMAGE, corner="se", dragons=3, heroes=False, invisibility=0
     )
-    assert result.on_grass is False
-    assert result.point == (866, 438)
-    assert result.taps == 1 + 1
-
-
-def test_deploy_dragon_corner_without_any_point(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine, taps = _fake_engine()
-    monkeypatch.setattr(attack_engine.ui, "find_corner_deploy_point", lambda image, corner: None)
-    monkeypatch.setattr(attack_engine.ui, "find_deploy_candidates", lambda image, limit=10: [])
-    monkeypatch.setattr(attack_engine.ui, "battle_field_grid", lambda image: [])
-    result = engine.deploy_dragon_corner(IMAGE, corner="ne", dragons=5)
     assert result.taps == 0
     assert result.point is None
     assert taps == []
@@ -236,21 +284,20 @@ def test_deploy_dragon_corner_without_any_point(monkeypatch: pytest.MonkeyPatch)
 
 
 # --------------------------------------------------------------------------- fase deploy
-def _phase_engine(monkeypatch: pytest.MonkeyPatch, states_sequence) -> tuple:
+def _phase_engine(monkeypatch: pytest.MonkeyPatch) -> tuple:
     engine = attack_engine.AttackEngine.__new__(attack_engine.AttackEngine)
     engine.config = Config()
     engine.logs = []
     engine.log = engine.logs.append
     engine.grab = lambda: IMAGE
     calls = {"deploy": 0, "wait": 0, "pan": 0}
-    deploys: list[dict] = []
+    outcome = CornerDeploy(taps=40, point=(120, 780), on_grass=True, corner="se", deployed=13)
 
     def fake_deploy(image, **kwargs):
         calls["deploy"] += 1
-        deploys.append(kwargs)
-        return CornerDeploy(taps=28, point=(120, 780), on_grass=True, corner=kwargs["corner"])
+        return outcome
 
-    def fake_wait(**_kwargs):
+    def fake_wait(**kwargs):
         calls["wait"] += 1
         return True
 
@@ -259,21 +306,11 @@ def _phase_engine(monkeypatch: pytest.MonkeyPatch, states_sequence) -> tuple:
     engine.pan_camera_towards_corner = lambda corner, image=None: calls.__setitem__(
         "pan", calls["pan"] + 1
     )
-    iterator = iter(states_sequence)
-    monkeypatch.setattr(
-        attack_engine.states,
-        "classify",
-        lambda image: next(iterator, attack_engine.ScreenState.BATTLE),
-    )
-    return engine, calls, deploys
+    return engine, calls
 
 
-def test_corner_phase_deploys_immediately_and_skips_countdown(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine, calls, _deploys = _phase_engine(
-        monkeypatch, [attack_engine.ScreenState.BATTLE]
-    )
+def test_corner_phase_deploys_right_at_battle_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, calls = _phase_engine(monkeypatch)
     report: dict = {"action": None}
     ok = engine.deploy_corner_phase(
         report=report,
@@ -284,45 +321,21 @@ def test_corner_phase_deploys_immediately_and_skips_countdown(
         invisibility_card_slot=0,
     )
     assert ok is True
-    assert calls["deploy"] == 1  # deployato subito in anteprima
-    assert calls["wait"] == 0  # nessuna attesa del countdown
+    assert calls["wait"] == 1  # aspetta l'inizio (countdown imposto dal gioco)
+    assert calls["deploy"] == 1  # un solo deploy, niente tap sprecati in anteprima
     assert calls["pan"] == 1
-    assert report["deploy_phase"] == "preview"
-    assert report["battle_started_by_deploy"] is True
-    assert report["deploy_taps"] == 28
-
-
-def test_corner_phase_falls_back_to_battle_start(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine, calls, _deploys = _phase_engine(
-        monkeypatch,
-        [attack_engine.ScreenState.PREVIEW, attack_engine.ScreenState.BATTLE],
-    )
-    report: dict = {"action": None}
-    ok = engine.deploy_corner_phase(
-        report=report,
-        corner="nw",
-        dragons=13,
-        heroes=True,
-        invisibility=5,
-        invisibility_card_slot=0,
-    )
-    assert ok is True
-    assert calls["wait"] == 1  # ha atteso l'inizio della battaglia
-    assert calls["deploy"] == 2  # e ripetuto il deploy
-    assert calls["pan"] == 2
-    assert report["preview_deploy_ignored"] is True
     assert report["deploy_phase"] == "battle"
-    assert report["deploy_taps"] == 28 + 28
+    assert report["preview_deploy_ignored"] is True
+    assert report["deploy_taps"] == 40
+    assert report["dragon_deployed"] == 13
+    assert report["deploy_point"] == (120, 780)
 
 
 def test_corner_phase_reports_when_battle_never_starts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    engine, _calls, _deploys = _phase_engine(
-        monkeypatch,
-        [attack_engine.ScreenState.PREVIEW, attack_engine.ScreenState.PREVIEW],
-    )
-    engine.wait_battle_start = lambda **_kwargs: False
+    engine, calls = _phase_engine(monkeypatch)
+    engine.wait_battle_start = lambda **kwargs: False
     report: dict = {"action": None}
     ok = engine.deploy_corner_phase(
         report=report,
@@ -334,6 +347,30 @@ def test_corner_phase_reports_when_battle_never_starts(
     )
     assert ok is False
     assert report["action"] == "battle_not_started"
+    assert calls["deploy"] == 0
+
+
+# --------------------------------------------------------------------------- SURRENDER
+@live_dataset
+def test_end_battle_early_confirms_surrender_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
+    image = _load_live("surrender-dialog.png")
+    engine = attack_engine.AttackEngine.__new__(attack_engine.AttackEngine)
+    engine.config = Config()
+    engine.logs = []
+    engine.log = engine.logs.append
+    taps: list[tuple[int, int]] = []
+    engine._tap = lambda point, wait_s=None: taps.append(point)
+    frames = iter([image, image, _load_live("risultati-1.png")])
+    engine.grab = lambda: next(frames, image)
+    real_classify = states.classify
+    monkeypatch.setattr(
+        attack_engine.states, "classify", lambda frame: real_classify(frame)
+    )
+    monkeypatch.setattr(attack_engine.time, "sleep", lambda seconds: None)
+    okay = ui.find_surrender_ok(image)
+    assert okay is not None
+    assert engine.end_battle_early(confirm_timeout_s=2.0) is True
+    assert okay in taps
 
 
 # --------------------------------------------------------------------------- CLI/config

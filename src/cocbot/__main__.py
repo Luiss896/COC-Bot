@@ -628,14 +628,17 @@ def cmd_attack_run(args: argparse.Namespace) -> int:
             corner = f" · angolo={report['corner']}" if report.get("corner") else ""
             phase = report.get("deploy_phase")
             phase_txt = {
-                "preview": "subito (anteprima, senza countdown)",
-                "battle": "all'inizio della battaglia (countdown non superabile)",
+                "preview": "subito (anteprima)",
+                "battle": "al primo istante della battaglia (il countdown e' imposto dal gioco)",
             }.get(phase or "", phase or "—")
             print(f"  strategia: {report['strategy']}{corner} · deploy {phase_txt}")
-            if report.get("battle_started_by_deploy"):
-                print("  battaglia avviata dal deploy in anteprima (countdown saltato)")
             if report.get("preview_deploy_ignored"):
-                print("  nota: tap in anteprima ignorati dal gioco → deploy all'inizio battaglia")
+                print(
+                    "  nota: durante il countdown il gioco ignora i tap → deploy al primo "
+                    "istante utile della battaglia"
+                )
+            if report.get("dragon_deployed") is not None:
+                print(f"  draghi deployati: {report.get('dragon_deployed')}")
             if report.get("deploy_point"):
                 print(
                     f"  punto deploy: {report['deploy_point']} "

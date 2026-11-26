@@ -75,12 +75,13 @@ army:
   min_reserve_for_army: { gold: 200000, elixir: 300000, dark: 5000 }
 
 attack:
-  # Strategia default DRAGON CORNER (23 nov 2026): un angolo della mappa scelto a caso;
-  # TUTTI i draghi in un unico punto di erba libera dell'angolo, poi le Invisibility
-  # Spell sui draghi, poi gli eroi. Il deploy parte SUBITO in anteprima, senza aspettare
-  # i ~30 s del countdown "Battle starts in" (se il gioco ignora i tap in anteprima, il
-  # bot li ripete appena la battaglia inizia). Gli angoli evitano le zone piene di
-  # edifici dove i tap non deployano.
+  # Strategia default DRAGON CORNER (23 nov 2026, aggiornata dopo il live):
+  # un angolo / anello della mappa scelto a caso; TUTTI i draghi in un unico punto di erba
+  # FUORI dalle mura nemiche (dove il gioco permette il deploy), poi le Invisibility Spell
+  # sui draghi, poi i 3 eroi. Il deploy e' ADATTIVO: verifica dal contatore della card che
+  # ogni tap schieri davvero, altrimenti prova il punto successivo. Durante il countdown
+  # "Battle starts in" (~30 s) il gioco ignora i tap: il bot deploya al primo istante
+  # della battaglia, senza altre attese.
   # dragon_clone = tutti i draghi nello stesso punto al centro, cloni, eroi;
   # dragon_spam = vecchia strategia a due passate (griglia di tap).
   strategy: "dragon_corner"
